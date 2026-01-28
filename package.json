@@ -1,0 +1,47 @@
+{
+  "name": "adept",
+  "version": "0.1.0",
+  "description": "Adept - Slack-first AI agent that connects your business tools",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": [
+    "ai",
+    "slack",
+    "agent",
+    "business",
+    "automation",
+    "vercel-ai-sdk"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.0",
+    "@ai-sdk/openai": "^2.0.0",
+    "@octokit/rest": "^21.0.0",
+    "@slack/bolt": "^4.1.0",
+    "@slack/web-api": "^7.9.0",
+    "ai": "^6.0.0",
+    "dotenv": "^16.4.0",
+    "googleapis": "^140.0.0",
+    "jsforce": "^3.5.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript-eslint": "^8.54.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
