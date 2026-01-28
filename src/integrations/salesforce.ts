@@ -1,19 +1,26 @@
 import { tool } from 'ai';
 import jsforce from 'jsforce';
-import type { Connection } from 'jsforce';
+import type { Connection, QueryResult } from 'jsforce';
 import { z } from 'zod';
 import { BaseIntegration } from './base.js';
 import { tokenStore } from '../lib/token-store.js';
+import { IntegrationAuthError, IntegrationError, createToolError, toToolError } from '../lib/errors.js';
+import { withRetry } from '../lib/retry.js';
 import type { SearchResult } from '../types/index.js';
 
 const DEFAULT_LOGIN_URL = 'https://login.salesforce.com';
 const TOKEN_TTL_MS = 45 * 60 * 1000;
+const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000;
+const AUTH_HINT = 'Run "oauth status" in Slack to review Salesforce connection links.';
 
 interface SalesforceAuthConfig {
   clientId: string;
   clientSecret: string;
   refreshToken: string;
   loginUrl: string;
+  accessToken?: string;
+  instanceUrl?: string;
+  expiresAt?: number;
 }
 
 interface SalesforceTokenResponse {
@@ -23,7 +30,16 @@ interface SalesforceTokenResponse {
   refresh_token?: string;
 }
 
-interface SalesforceContactRecord {
+interface SalesforceStoredTokens extends Record<string, unknown> {
+  accessToken?: string;
+  refreshToken?: string;
+  instanceUrl?: string;
+  issuedAt?: string;
+  expiresAt?: number;
+  updatedAt?: string;
+}
+
+interface SalesforceContactRecord extends Record<string, unknown> {
   Id: string;
   Name?: string;
   Email?: string;
@@ -35,7 +51,7 @@ interface SalesforceContactRecord {
   };
 }
 
-interface SalesforceOpportunityRecord {
+interface SalesforceOpportunityRecord extends Record<string, unknown> {
   Id: string;
   Name?: string;
   Amount?: number;
@@ -50,7 +66,7 @@ interface SalesforceOpportunityRecord {
   };
 }
 
-interface SalesforceAccountRecord {
+interface SalesforceAccountRecord extends Record<string, unknown> {
   Id: string;
   Name?: string;
   Industry?: string;
@@ -62,7 +78,7 @@ interface SalesforceAccountRecord {
   };
 }
 
-interface SalesforceStageSummaryRecord {
+interface SalesforceStageSummaryRecord extends Record<string, unknown> {
   StageName?: string;
   totalAmount?: number;
   dealCount?: number;
@@ -111,7 +127,6 @@ const buildLike = (value: string) => `%${sanitizeSoql(value)}%`;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-const formatError = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 class SalesforceClient {
   private accessToken?: string;
@@ -122,12 +137,17 @@ class SalesforceClient {
   private clientId: string;
   private clientSecret: string;
   private loginUrl: string;
+  private onTokenUpdate?: (tokens: SalesforceStoredTokens) => Promise<void>;
 
-  constructor(config: SalesforceAuthConfig) {
+  constructor(config: SalesforceAuthConfig, onTokenUpdate?: (tokens: SalesforceStoredTokens) => Promise<void>) {
     this.clientId = config.clientId;
     this.clientSecret = config.clientSecret;
     this.refreshToken = config.refreshToken;
     this.loginUrl = config.loginUrl.replace(/\/$/, '');
+    this.accessToken = config.accessToken;
+    this.instanceUrl = config.instanceUrl;
+    this.expiresAt = config.expiresAt;
+    this.onTokenUpdate = onTokenUpdate;
   }
 
   async getConnection(): Promise<Connection> {
@@ -148,7 +168,7 @@ class SalesforceClient {
       return false;
     }
 
-    return Date.now() < this.expiresAt;
+    return Date.now() < this.expiresAt - TOKEN_REFRESH_BUFFER_MS;
   }
 
   private async ensureAccessToken(): Promise<void> {
@@ -172,18 +192,31 @@ class SalesforceClient {
       refresh_token: this.refreshToken,
     });
 
-    const response = await fetch(`${this.loginUrl}/services/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
+    const response = await withRetry(
+      async () => {
+        const res = await fetch(`${this.loginUrl}/services/oauth2/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: body.toString(),
+        });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Salesforce token refresh failed (${response.status}): ${errorBody}`);
-    }
+        if (!res.ok) {
+          const errorBody = await res.text();
+          const error = new Error(`Salesforce token refresh failed (${res.status}): ${errorBody}`) as Error & {
+            status?: number;
+            headers?: Headers;
+          };
+          error.status = res.status;
+          error.headers = res.headers;
+          throw error;
+        }
+
+        return res;
+      },
+      { integrationId: 'salesforce', operation: 'refresh token' },
+    );
 
     const data = (await response.json()) as SalesforceTokenResponse;
 
@@ -198,6 +231,15 @@ class SalesforceClient {
     if (data.refresh_token) {
       this.refreshToken = data.refresh_token;
     }
+
+    await this.onTokenUpdate?.({
+      accessToken: this.accessToken,
+      refreshToken: this.refreshToken,
+      instanceUrl: this.instanceUrl,
+      issuedAt: data.issued_at,
+      expiresAt: this.expiresAt,
+      updatedAt: new Date().toISOString(),
+    });
   }
 }
 
@@ -231,7 +273,7 @@ export class SalesforceIntegration extends BaseIntegration {
             const results = await this.queryContacts(query, limit ?? 10);
             return { contacts: results, total: results.length };
           } catch (error) {
-            return { error: formatError(error) };
+            return toToolError(this.id, error);
           }
         },
       }),
@@ -247,11 +289,11 @@ export class SalesforceIntegration extends BaseIntegration {
           try {
             const contact = await this.getContactDetails({ contactId, name, email });
             if (!contact) {
-              return { error: 'No matching Salesforce contact found.' };
+              return createToolError(this.id, 'No matching Salesforce contact found.', { kind: 'not_found' });
             }
             return { contact };
           } catch (error) {
-            return { error: formatError(error) };
+            return toToolError(this.id, error);
           }
         },
       }),
@@ -291,7 +333,7 @@ export class SalesforceIntegration extends BaseIntegration {
               },
             };
           } catch (error) {
-            return { error: formatError(error) };
+            return toToolError(this.id, error);
           }
         },
       }),
@@ -303,7 +345,7 @@ export class SalesforceIntegration extends BaseIntegration {
           try {
             return await this.getPipelineSummary();
           } catch (error) {
-            return { error: formatError(error) };
+            return toToolError(this.id, error);
           }
         },
       }),
@@ -318,11 +360,11 @@ export class SalesforceIntegration extends BaseIntegration {
           try {
             const account = await this.getAccountSummary({ accountId, name });
             if (!account) {
-              return { error: 'No matching Salesforce account found.' };
+              return createToolError(this.id, 'No matching Salesforce account found.', { kind: 'not_found' });
             }
             return { account };
           } catch (error) {
-            return { error: formatError(error) };
+            return toToolError(this.id, error);
           }
         },
       }),
@@ -364,12 +406,15 @@ export class SalesforceIntegration extends BaseIntegration {
   private async getClient(): Promise<SalesforceClient> {
     const clientId = process.env.SALESFORCE_CLIENT_ID;
     const clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
-    const storedTokens = await tokenStore.getTokens<{ refreshToken?: string }>(this.id);
+    const storedTokens = await tokenStore.getTokens<SalesforceStoredTokens>(this.id);
     const refreshToken = storedTokens?.refreshToken || process.env.SALESFORCE_REFRESH_TOKEN;
     const loginUrl = process.env.SALESFORCE_LOGIN_URL || DEFAULT_LOGIN_URL;
 
     if (!clientId || !clientSecret || !refreshToken) {
-      throw new Error('Salesforce credentials are missing.');
+      throw new IntegrationAuthError('Salesforce credentials are missing.', {
+        integrationId: this.id,
+        hint: AUTH_HINT,
+      });
     }
 
     const key = `${clientId}:${loginUrl}:${refreshToken}`;
@@ -379,6 +424,11 @@ export class SalesforceIntegration extends BaseIntegration {
         clientSecret,
         refreshToken,
         loginUrl,
+        accessToken: storedTokens?.accessToken,
+        instanceUrl: storedTokens?.instanceUrl,
+        expiresAt: storedTokens?.expiresAt,
+      }, async (tokens) => {
+        await tokenStore.setTokens(this.id, tokens);
       });
       this.clientKey = key;
     }
@@ -395,7 +445,7 @@ export class SalesforceIntegration extends BaseIntegration {
       `FROM Contact WHERE Name LIKE '${like}' OR Email LIKE '${like}' OR Account.Name LIKE '${like}' ` +
       `ORDER BY LastActivityDate DESC NULLS LAST LIMIT ${safeLimit}`;
 
-    const result = await conn.query<SalesforceContactRecord>(soql);
+    const result = await this.runQuery<SalesforceContactRecord>(conn, soql, 'query contacts');
     const records = result.records as SalesforceContactRecord[];
 
     return records.map((record) => ({
@@ -419,7 +469,9 @@ export class SalesforceIntegration extends BaseIntegration {
     email?: string;
   }): Promise<ContactSummary | null> {
     if (!contactId && !name && !email) {
-      throw new Error('Provide a contactId, name, or email to look up a contact.');
+      throw new IntegrationError('invalid_request', 'Provide a contactId, name, or email to look up a contact.', {
+        integrationId: this.id,
+      });
     }
 
     const conn = await (await this.getClient()).getConnection();
@@ -442,7 +494,7 @@ export class SalesforceIntegration extends BaseIntegration {
       'SELECT Id, Name, Email, Title, Phone, Account.Name, LastActivityDate ' +
       `FROM Contact WHERE ${conditions.join(' OR ')} ORDER BY LastActivityDate DESC LIMIT 1`;
 
-    const result = await conn.query<SalesforceContactRecord>(soql);
+    const result = await this.runQuery<SalesforceContactRecord>(conn, soql, 'get contact details');
     const record = (result.records as SalesforceContactRecord[])[0];
 
     if (!record) {
@@ -500,7 +552,7 @@ export class SalesforceIntegration extends BaseIntegration {
       'SELECT Id, Name, Amount, StageName, Probability, CloseDate, Account.Name, Owner.Name ' +
       `FROM Opportunity ${whereClause} ORDER BY CloseDate ASC NULLS LAST LIMIT ${safeLimit}`;
 
-    const result = await conn.query<SalesforceOpportunityRecord>(soql);
+    const result = await this.runQuery<SalesforceOpportunityRecord>(conn, soql, 'query opportunities');
     const records = result.records as SalesforceOpportunityRecord[];
 
     return records.map((record) => ({
@@ -523,7 +575,9 @@ export class SalesforceIntegration extends BaseIntegration {
     name?: string;
   }): Promise<AccountSummary | null> {
     if (!accountId && !name) {
-      throw new Error('Provide an accountId or name to look up an account.');
+      throw new IntegrationError('invalid_request', 'Provide an accountId or name to look up an account.', {
+        integrationId: this.id,
+      });
     }
 
     const conn = await (await this.getClient()).getConnection();
@@ -542,7 +596,7 @@ export class SalesforceIntegration extends BaseIntegration {
       'SELECT Id, Name, Industry, Website, Type, AnnualRevenue, Owner.Name ' +
       `FROM Account WHERE ${conditions.join(' OR ')} ORDER BY LastModifiedDate DESC LIMIT 1`;
 
-    const result = await conn.query<SalesforceAccountRecord>(soql);
+    const result = await this.runQuery<SalesforceAccountRecord>(conn, soql, 'get account summary');
     const record = (result.records as SalesforceAccountRecord[])[0];
 
     if (!record) {
@@ -566,7 +620,7 @@ export class SalesforceIntegration extends BaseIntegration {
       'SELECT StageName, SUM(Amount) totalAmount, COUNT(Id) dealCount ' +
       'FROM Opportunity WHERE IsClosed = false GROUP BY StageName';
 
-    const result = await conn.query<SalesforceStageSummaryRecord>(soql);
+    const result = await this.runQuery<SalesforceStageSummaryRecord>(conn, soql, 'get pipeline summary');
     const records = result.records as SalesforceStageSummaryRecord[];
 
     const byStage = records.map((record) => ({
@@ -588,5 +642,16 @@ export class SalesforceIntegration extends BaseIntegration {
       byStage,
       totals,
     };
+  }
+
+  private async runQuery<T extends Record<string, unknown>>(
+    conn: Connection,
+    soql: string,
+    operation: string,
+  ): Promise<QueryResult<T>> {
+    return withRetry(
+      () => conn.query<T>(soql).then((result) => result as QueryResult<T>),
+      { integrationId: this.id, operation },
+    );
   }
 }

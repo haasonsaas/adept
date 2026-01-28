@@ -1,5 +1,6 @@
 import { App, LogLevel } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
+import type { KnownBlock } from '@slack/web-api';
 
 let app: App;
 let webClient: WebClient;
@@ -77,41 +78,49 @@ export async function postMessage(
   channelId: string,
   text: string,
   threadTs?: string,
+  blocks?: KnownBlock[],
 ): Promise<string | undefined> {
   const client = getWebClient();
+  const resolvedBlocks = blocks ?? [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text,
+      },
+    },
+  ];
   const result = await client.chat.postMessage({
     channel: channelId,
     text,
     thread_ts: threadTs,
     unfurl_links: false,
-    blocks: [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text,
-        },
-      },
-    ],
+    blocks: resolvedBlocks,
   });
   return result.ts;
 }
 
-export async function updateMessage(channelId: string, ts: string, text: string): Promise<void> {
+export async function updateMessage(
+  channelId: string,
+  ts: string,
+  text: string,
+  blocks?: KnownBlock[],
+): Promise<void> {
   const client = getWebClient();
+  const resolvedBlocks = blocks ?? [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text,
+      },
+    },
+  ];
   await client.chat.update({
     channel: channelId,
     ts,
     text,
-    blocks: [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text,
-        },
-      },
-    ],
+    blocks: resolvedBlocks,
   });
 }
 

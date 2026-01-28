@@ -5,6 +5,7 @@ import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
 import { loadConfig } from './config.js';
 import { integrationRegistry } from '../integrations/registry.js';
+import { isToolErrorResponse } from './errors.js';
 
 const SYSTEM_INSTRUCTIONS = `You are Adept, an AI assistant for business operations. You help teams work faster by:
 - Answering questions using data from connected business systems
@@ -16,6 +17,7 @@ Guidelines:
 - Always cite your sources when using data from integrations
 - If you need to search multiple systems, do so efficiently
 - Format responses for Slack (use *bold*, _italic_, bullet points)
+- If a tool response includes an "error" field, explain the issue and include any provided "hint" to help the user resolve it
 - Current date: ${new Date().toISOString().split('T')[0]}
 
 When asked about a person, company, or deal:
@@ -86,10 +88,21 @@ export async function generateResponse(
     prompt,
     tools,
     stopWhen: stepCountIs(config.maxToolSteps),
-    onStepFinish: async ({ toolCalls }: { toolCalls?: Array<{ toolName: string }> }) => {
+    onStepFinish: async ({ toolCalls, toolResults }) => {
       if (toolCalls && toolCalls.length > 0 && onStatusUpdate) {
         const toolName = toolCalls[0].toolName.replace(/_/g, ' ');
         await onStatusUpdate(`Using ${toolName}...`);
+      }
+
+      if (toolResults && toolResults.length > 0 && onStatusUpdate) {
+        const errorResult = toolResults.find((toolResult) => {
+          const candidate = toolResult as { result?: unknown };
+          return isToolErrorResponse(candidate.result);
+        });
+        if (errorResult) {
+          const toolName = (errorResult as { toolName: string }).toolName.replace(/_/g, ' ');
+          await onStatusUpdate(`Tool error in ${toolName}.`);
+        }
       }
     },
   });
@@ -117,10 +130,21 @@ export async function generateResponseWithHistory(
     })),
     tools,
     stopWhen: stepCountIs(config.maxToolSteps),
-    onStepFinish: async ({ toolCalls }: { toolCalls?: Array<{ toolName: string }> }) => {
+    onStepFinish: async ({ toolCalls, toolResults }) => {
       if (toolCalls && toolCalls.length > 0 && onStatusUpdate) {
         const toolName = toolCalls[0].toolName.replace(/_/g, ' ');
         await onStatusUpdate(`Using ${toolName}...`);
+      }
+
+      if (toolResults && toolResults.length > 0 && onStatusUpdate) {
+        const errorResult = toolResults.find((toolResult) => {
+          const candidate = toolResult as { result?: unknown };
+          return isToolErrorResponse(candidate.result);
+        });
+        if (errorResult) {
+          const toolName = (errorResult as { toolName: string }).toolName.replace(/_/g, ' ');
+          await onStatusUpdate(`Tool error in ${toolName}.`);
+        }
       }
     },
   });

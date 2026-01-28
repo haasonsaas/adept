@@ -6,6 +6,7 @@ import {
   setSuggestedPrompts,
   getBotUserId,
 } from '../lib/slack.js';
+import { handleCommand, getOnboardingResponse } from '../lib/commands.js';
 import type { AssistantThreadStartedEvent, DirectMessageEvent } from '../types/slack.js';
 
 export async function handleDirectMessage(event: DirectMessageEvent): Promise<void> {
@@ -30,6 +31,13 @@ export async function handleDirectMessage(event: DirectMessageEvent): Promise<vo
 
     let response: string;
 
+    const commandResponse = text ? await handleCommand(text) : null;
+    if (commandResponse) {
+      await postMessage(channel, commandResponse.text, threadTs, commandResponse.blocks);
+      await updateStatus('');
+      return;
+    }
+
     if (thread_ts) {
       // Get thread context
       const messages = await getThreadMessages(channel, thread_ts, botUserId);
@@ -53,15 +61,9 @@ export async function handleAssistantThreadStarted(event: AssistantThreadStarted
 
   console.log(`[Assistant] Thread started in ${channel_id}`);
 
-  await postMessage(
-    channel_id,
-    "Hi! I'm Adept, your AI assistant for business operations. I can help you with:\n\n" +
-      '• *Salesforce*: Look up contacts, accounts, opportunities, pipeline\n' +
-      '• *GitHub*: Search issues, review PRs, summarize repos\n' +
-      '• *Google Drive*: Find and read files, docs, and notes\n\n' +
-      'Just ask me anything!',
-    thread_ts,
-  );
+  const onboarding = getOnboardingResponse();
+
+  await postMessage(channel_id, onboarding.text, thread_ts, onboarding.blocks);
 
   await setSuggestedPrompts(channel_id, thread_ts, [
     {

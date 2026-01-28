@@ -4,7 +4,10 @@ import { google } from 'googleapis';
 import { tokenStore } from './token-store.js';
 
 const DEFAULT_PORT = 3999;
+const DEFAULT_BIND_HOST = '127.0.0.1';
 const STATE_TTL_MS = 10 * 60 * 1000;
+const SHARED_SECRET = process.env.OAUTH_SHARED_SECRET;
+const SALESFORCE_ACCESS_TTL_MS = 45 * 60 * 1000;
 
 type IntegrationKey = 'salesforce' | 'github' | 'google-drive';
 
@@ -22,6 +25,9 @@ interface SalesforceTokenResponse {
 
 interface GitHubTokenResponse {
   access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  refresh_token_expires_in?: number;
   token_type?: string;
   scope?: string;
   error?: string;
@@ -32,7 +38,49 @@ const stateStore = new Map<string, OAuthState>();
 
 const getPort = () => Number(process.env.OAUTH_PORT || DEFAULT_PORT);
 
+const getBindHost = () => process.env.OAUTH_BIND_HOST || DEFAULT_BIND_HOST;
+
 const getBaseUrl = (port: number) => process.env.OAUTH_BASE_URL || `http://localhost:${port}`;
+
+const allowRemoteRequests = () => process.env.OAUTH_ALLOW_REMOTE === 'true';
+
+const getSharedSecret = (url: URL, req: http.IncomingMessage): string | null => {
+  const querySecret = url.searchParams.get('secret');
+  if (querySecret) {
+    return querySecret;
+  }
+
+  const header = req.headers['x-adept-oauth-secret'];
+  if (Array.isArray(header)) {
+    return header[0] ?? null;
+  }
+  if (typeof header === 'string') {
+    return header;
+  }
+
+  return null;
+};
+
+const isSharedSecretValid = (url: URL, req: http.IncomingMessage): boolean => {
+  if (!SHARED_SECRET) {
+    return true;
+  }
+
+  const provided = getSharedSecret(url, req);
+  return Boolean(provided && provided === SHARED_SECRET);
+};
+
+const isLocalAddress = (address?: string | null) => {
+  if (!address) {
+    return false;
+  }
+  return (
+    address === '127.0.0.1' ||
+    address === '::1' ||
+    address.startsWith('127.') ||
+    address.startsWith('::ffff:127.')
+  );
+};
 
 const getRedirectUri = (integration: IntegrationKey, baseUrl: string): string => {
   if (integration === 'salesforce') {
@@ -280,9 +328,12 @@ const handleCallback = async (
         throw new Error('Salesforce did not return a refresh token. Ensure refresh_token scope is enabled.');
       }
       await tokenStore.setTokens('salesforce', {
+        accessToken: data.access_token,
         refreshToken: data.refresh_token,
         instanceUrl: data.instance_url,
         issuedAt: data.issued_at,
+        expiresAt: Date.now() + SALESFORCE_ACCESS_TTL_MS,
+        updatedAt: new Date().toISOString(),
       });
       sendResponse(res, 200, renderHtml('Salesforce connected', 'Refresh token saved for Adept.'));
       return;
@@ -293,10 +344,19 @@ const handleCallback = async (
       if (!data.access_token) {
         throw new Error(data.error_description || 'GitHub did not return an access token.');
       }
+      const now = Date.now();
+      const expiresAt = data.expires_in ? now + data.expires_in * 1000 : undefined;
+      const refreshTokenExpiresAt = data.refresh_token_expires_in
+        ? now + data.refresh_token_expires_in * 1000
+        : undefined;
       await tokenStore.setTokens('github', {
         accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresAt,
+        refreshTokenExpiresAt,
         scope: data.scope,
         tokenType: data.token_type,
+        updatedAt: new Date().toISOString(),
       });
       sendResponse(res, 200, renderHtml('GitHub connected', 'Access token saved for Adept.'));
       return;
@@ -308,9 +368,12 @@ const handleCallback = async (
     }
 
     await tokenStore.setTokens('google_drive', {
+      accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       scope: tokens.scope,
       expiryDate: tokens.expiry_date,
+      tokenType: tokens.token_type,
+      updatedAt: new Date().toISOString(),
     });
 
     sendResponse(res, 200, renderHtml('Google Drive connected', 'Refresh token saved for Adept.'));
@@ -322,10 +385,16 @@ const handleCallback = async (
 export const startOAuthServer = () => {
   const port = getPort();
   const baseUrl = getBaseUrl(port);
+  const bindHost = getBindHost();
 
   const server = http.createServer(async (req, res) => {
     if (!req.url || req.method !== 'GET') {
       sendResponse(res, 404, renderHtml('Not found', 'Route not found.'));
+      return;
+    }
+
+    if (!allowRemoteRequests() && !isLocalAddress(req.socket.remoteAddress)) {
+      sendResponse(res, 403, renderHtml('Forbidden', 'Remote requests are disabled for this OAuth server.'));
       return;
     }
 
@@ -334,16 +403,28 @@ export const startOAuthServer = () => {
 
     try {
       if (path === '/oauth/salesforce/start') {
+        if (!isSharedSecretValid(url, req)) {
+          sendResponse(res, 401, renderHtml('Unauthorized', 'Missing or invalid shared secret.'));
+          return;
+        }
         handleStart('salesforce', baseUrl, res);
         return;
       }
 
       if (path === '/oauth/github/start') {
+        if (!isSharedSecretValid(url, req)) {
+          sendResponse(res, 401, renderHtml('Unauthorized', 'Missing or invalid shared secret.'));
+          return;
+        }
         handleStart('github', baseUrl, res);
         return;
       }
 
       if (path === '/oauth/google-drive/start') {
+        if (!isSharedSecretValid(url, req)) {
+          sendResponse(res, 401, renderHtml('Unauthorized', 'Missing or invalid shared secret.'));
+          return;
+        }
         handleStart('google-drive', baseUrl, res);
         return;
       }
@@ -369,7 +450,7 @@ export const startOAuthServer = () => {
     }
   });
 
-  server.listen(port, () => {
+  server.listen(port, bindHost, () => {
     console.log(`[Adept] OAuth server listening on ${baseUrl}`);
   });
 

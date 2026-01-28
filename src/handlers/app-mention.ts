@@ -1,5 +1,6 @@
 import { generateResponse, generateResponseWithHistory } from '../lib/agent.js';
 import { getThreadMessages, postMessage, updateMessage, getBotUserId } from '../lib/slack.js';
+import { handleCommand } from '../lib/commands.js';
 import type { AppMentionEvent } from '../types/slack.js';
 
 export async function handleAppMention(event: AppMentionEvent): Promise<void> {
@@ -29,14 +30,20 @@ export async function handleAppMention(event: AppMentionEvent): Promise<void> {
   try {
     let response: string;
 
+    const cleanedText = text.replace(new RegExp(`<@${botUserId}>\\s*`, 'g'), '').trim();
+    const commandResponse = await handleCommand(cleanedText);
+    if (commandResponse) {
+      await updateMessage(channel, thinkingTs, commandResponse.text, commandResponse.blocks);
+      return;
+    }
+
     if (thread_ts) {
       // Get full thread context
       const messages = await getThreadMessages(channel, thread_ts, botUserId);
       response = await generateResponseWithHistory(messages, updateStatus);
     } else {
       // Single message - remove the mention
-      const content = text.replace(new RegExp(`<@${botUserId}>\\s*`, 'g'), '').trim();
-      response = await generateResponse(content, updateStatus);
+      response = await generateResponse(cleanedText, updateStatus);
     }
 
     await updateMessage(channel, thinkingTs, response);

@@ -1,21 +1,36 @@
 import { tool } from 'ai';
 import { google, drive_v3 } from 'googleapis';
+import type { Credentials, OAuth2Client } from 'google-auth-library';
 import { z } from 'zod';
 import { BaseIntegration } from './base.js';
 import { tokenStore } from '../lib/token-store.js';
+import { IntegrationAuthError, createToolError, toToolError } from '../lib/errors.js';
+import { withRetry } from '../lib/retry.js';
 import type { SearchResult } from '../types/index.js';
 
 const MAX_TEXT_CHARS = 20000;
 const MAX_BINARY_BYTES = 1024 * 1024;
+const AUTH_HINT = 'Run "oauth status" in Slack to review Google Drive connection links.';
 
 interface DriveAuthConfig {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
   refreshToken: string;
+  accessToken?: string;
+  expiryDate?: number;
+  tokenType?: string;
+  scope?: string;
 }
 
-const formatError = (error: unknown) => (error instanceof Error ? error.message : String(error));
+interface DriveStoredTokens extends Record<string, unknown> {
+  refreshToken?: string;
+  accessToken?: string;
+  expiryDate?: number;
+  tokenType?: string;
+  scope?: string;
+  updatedAt?: string;
+}
 
 const sanitizeQuery = (value: string) => value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
@@ -43,8 +58,50 @@ const toBuffer = (data: unknown): Buffer => {
 
 class DriveClient {
   private drive?: drive_v3.Drive;
+  private auth?: OAuth2Client;
+  private onTokenUpdate?: (tokens: DriveStoredTokens) => Promise<void>;
 
-  constructor(private config: DriveAuthConfig) {}
+  constructor(config: DriveAuthConfig, onTokenUpdate?: (tokens: DriveStoredTokens) => Promise<void>) {
+    this.config = { ...config };
+    this.onTokenUpdate = onTokenUpdate;
+  }
+
+  private config: DriveAuthConfig;
+
+  private handleTokenUpdate(tokens: Credentials) {
+    if (tokens.refresh_token) {
+      this.config.refreshToken = tokens.refresh_token;
+    }
+
+    if (tokens.access_token) {
+      this.config.accessToken = tokens.access_token;
+    }
+
+    if (tokens.expiry_date) {
+      this.config.expiryDate = tokens.expiry_date;
+    }
+
+    if (tokens.token_type) {
+      this.config.tokenType = tokens.token_type;
+    }
+
+    if (tokens.scope) {
+      this.config.scope = tokens.scope;
+    }
+
+    if (!this.onTokenUpdate) {
+      return;
+    }
+
+    void this.onTokenUpdate({
+      refreshToken: this.config.refreshToken,
+      accessToken: this.config.accessToken,
+      expiryDate: this.config.expiryDate,
+      tokenType: this.config.tokenType,
+      scope: this.config.scope,
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   getDrive(): drive_v3.Drive {
     if (!this.drive) {
@@ -54,9 +111,16 @@ class DriveClient {
         this.config.redirectUri,
       );
 
-      auth.setCredentials({ refresh_token: this.config.refreshToken });
+      auth.setCredentials({
+        refresh_token: this.config.refreshToken,
+        access_token: this.config.accessToken,
+        expiry_date: this.config.expiryDate,
+        token_type: this.config.tokenType,
+      });
 
-      this.drive = google.drive({ version: 'v3', auth });
+      auth.on('tokens', (tokens) => this.handleTokenUpdate(tokens));
+      this.auth = auth;
+      this.drive = google.drive({ version: 'v3', auth: this.auth });
     }
 
     return this.drive;
@@ -100,7 +164,7 @@ export class GoogleDriveIntegration extends BaseIntegration {
           try {
             return await this.searchFiles({ query, mimeType, includeTrashed, limit: limit ?? 10 });
           } catch (error) {
-            return { error: formatError(error) };
+            return toToolError(this.id, error);
           }
         },
       }),
@@ -114,7 +178,7 @@ export class GoogleDriveIntegration extends BaseIntegration {
           try {
             return await this.getFileMetadata(fileId);
           } catch (error) {
-            return { error: formatError(error) };
+            return toToolError(this.id, error);
           }
         },
       }),
@@ -129,7 +193,7 @@ export class GoogleDriveIntegration extends BaseIntegration {
           try {
             return await this.readFileText(fileId, maxChars ?? MAX_TEXT_CHARS);
           } catch (error) {
-            return { error: formatError(error) };
+            return toToolError(this.id, error);
           }
         },
       }),
@@ -164,11 +228,14 @@ export class GoogleDriveIntegration extends BaseIntegration {
     const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET;
     const redirectUri = process.env.GOOGLE_DRIVE_REDIRECT_URI;
-    const stored = await tokenStore.getTokens<{ refreshToken?: string }>(this.id);
+    const stored = await tokenStore.getTokens<DriveStoredTokens>(this.id);
     const refreshToken = stored?.refreshToken || process.env.GOOGLE_DRIVE_REFRESH_TOKEN;
 
     if (!clientId || !clientSecret || !redirectUri || !refreshToken) {
-      throw new Error('Google Drive OAuth configuration is missing.');
+      throw new IntegrationAuthError('Google Drive OAuth configuration is missing.', {
+        integrationId: this.id,
+        hint: AUTH_HINT,
+      });
     }
 
     const key = `${clientId}:${redirectUri}:${refreshToken}`;
@@ -178,6 +245,12 @@ export class GoogleDriveIntegration extends BaseIntegration {
         clientSecret,
         redirectUri,
         refreshToken,
+        accessToken: stored?.accessToken,
+        expiryDate: stored?.expiryDate,
+        tokenType: stored?.tokenType,
+        scope: stored?.scope,
+      }, async (tokens) => {
+        await tokenStore.setTokens(this.id, tokens);
       });
       this.clientKey = key;
     }
@@ -213,61 +286,80 @@ export class GoogleDriveIntegration extends BaseIntegration {
 
     const q = filters.length > 0 ? filters.join(' and ') : undefined;
     const pageSize = clamp(limit, 1, 50);
-    const response = await drive.files.list({
-      q,
-      pageSize,
-      fields: 'files(id,name,mimeType,modifiedTime,webViewLink,owners(displayName,emailAddress),size)',
-      includeItemsFromAllDrives: true,
-      supportsAllDrives: true,
-    });
+    const response = await withRetry(
+      () =>
+        drive.files.list({
+          q,
+          pageSize,
+          fields: 'files(id,name,mimeType,modifiedTime,webViewLink,owners(displayName,emailAddress),size)',
+          includeItemsFromAllDrives: true,
+          supportsAllDrives: true,
+        }),
+      { integrationId: this.id, operation: 'drive search' },
+    );
 
     return { files: response.data.files ?? [] };
   }
 
   private async getFileMetadata(fileId: string) {
     const drive = (await this.getClient()).getDrive();
-    const response = await drive.files.get({
-      fileId,
-      fields: 'id,name,mimeType,modifiedTime,createdTime,webViewLink,owners(displayName,emailAddress),size',
-      supportsAllDrives: true,
-    });
+    const response = await withRetry(
+      () =>
+        drive.files.get({
+          fileId,
+          fields: 'id,name,mimeType,modifiedTime,createdTime,webViewLink,owners(displayName,emailAddress),size',
+          supportsAllDrives: true,
+        }),
+      { integrationId: this.id, operation: 'drive metadata' },
+    );
 
     return { file: response.data };
   }
 
   private async readFileText(fileId: string, maxChars: number) {
     const drive = (await this.getClient()).getDrive();
-    const metadataResponse = await drive.files.get({
-      fileId,
-      fields: 'id,name,mimeType,webViewLink,size',
-      supportsAllDrives: true,
-    });
+    const metadataResponse = await withRetry(
+      () =>
+        drive.files.get({
+          fileId,
+          fields: 'id,name,mimeType,webViewLink,size',
+          supportsAllDrives: true,
+        }),
+      { integrationId: this.id, operation: 'drive file fetch' },
+    );
 
     const file = metadataResponse.data;
     const mimeType = file.mimeType || '';
     const size = file.size ? Number(file.size) : undefined;
 
     if (size && size > MAX_BINARY_BYTES && !mimeType.startsWith('application/vnd.google-apps.')) {
-      return { error: `File is too large to read (${size} bytes).` };
+      return createToolError(this.id, `File is too large to read (${size} bytes).`, {
+        kind: 'invalid_request',
+      });
     }
 
     let responseData: ArrayBuffer | Uint8Array | Buffer | string;
 
     if (mimeType.startsWith('application/vnd.google-apps.')) {
       const exportType = mimeType.includes('spreadsheet') ? 'text/csv' : 'text/plain';
-      const exportResponse = await drive.files.export(
-        { fileId, mimeType: exportType },
-        { responseType: 'arraybuffer' },
+      const exportResponse = await withRetry(
+        () =>
+          drive.files.export({ fileId, mimeType: exportType }, { responseType: 'arraybuffer' }),
+        { integrationId: this.id, operation: 'drive export' },
       );
       responseData = exportResponse.data as ArrayBuffer;
     } else if (mimeType.startsWith('text/') || mimeType === 'application/json') {
-      const mediaResponse = await drive.files.get(
-        { fileId, alt: 'media' },
-        { responseType: 'arraybuffer' },
+      const mediaResponse = await withRetry(
+        () => drive.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' }),
+        { integrationId: this.id, operation: 'drive file download' },
       );
       responseData = mediaResponse.data as ArrayBuffer;
     } else {
-      return { error: `File type ${mimeType || 'unknown'} is not supported for text extraction.` };
+      return createToolError(
+        this.id,
+        `File type ${mimeType || 'unknown'} is not supported for text extraction.`,
+        { kind: 'invalid_request' },
+      );
     }
 
     const content = toBuffer(responseData).toString('utf-8');
