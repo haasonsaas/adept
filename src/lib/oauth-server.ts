@@ -22,8 +22,8 @@ const getSharedSecret = (url: URL, req: http.IncomingMessage): string | null => 
     return querySecret;
   }
 
-  const oauthHeader = req.headers['x-adept-oauth-secret'];
-  const webhookHeader = req.headers['x-adept-webhook-secret'];
+  const oauthHeader = req.headers['x-wayfinder-oauth-secret'];
+  const webhookHeader = req.headers['x-wayfinder-webhook-secret'];
   const header = webhookHeader ?? oauthHeader;
   if (Array.isArray(header)) {
     return header[0] ?? null;
@@ -175,7 +175,7 @@ const handleCallback = async (
         200,
         renderHtml(
           `${integration.name} connected`,
-          `Successfully connected ${integration.name} to Adept.`,
+          `Successfully connected ${integration.name} to Wayfinder.`,
         ),
       );
       return;
@@ -307,7 +307,7 @@ export const startOAuthServer = () => {
   });
 
   server.listen(port, bindHost, () => {
-    logger.info({ baseUrl }, '[Adept] OAuth server listening');
+    logger.info({ baseUrl }, '[Wayfinder] OAuth server listening');
   });
 
   return server;

@@ -29,7 +29,7 @@ const increment = (target: Record<string, number>, key: string): void => {
 };
 
 export class HandoffMonitor {
-  private store = new RedisJsonStore<HandoffMetrics>('adept:handoff_metrics');
+  private store = new RedisJsonStore<HandoffMetrics>('wayfinder:handoff_metrics');
   private fallback = new Map<string, HandoffMetrics>();
 
   private getBucket(): string {

@@ -1,7 +1,7 @@
 {
-  "name": "adept",
+  "name": "wayfinder",
   "version": "0.1.0",
-  "description": "Adept - Slack-first AI agent that connects your business tools",
+  "description": "Wayfinder - Slack-first AI agent that connects your business tools",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

@@ -32,7 +32,7 @@ const buildExecutorInstructions = (options?: {
     ? `\nAllowed tools for this workspace:\n${options.allowlistSummary}`
     : '';
 
-  return `You are Adept Executor, an internal execution engine for Adept. You do not talk to the user.
+  return `You are Wayfinder Executor, an internal execution engine for Wayfinder. You do not talk to the user.
 
 Mission:
 - Use tools to gather information and perform actions.
@@ -40,6 +40,11 @@ Mission:
 - If you need a capability, use tool_registry_search to find the right tool.
 - Never fabricate tool results, IDs, links, or outcomes.
 - If required tools are unavailable, mark the request as blocked and explain what is missing.
+- If required tools are unavailable, mark the request as blocked and explain what is missing.
+
+Briefing output (person/company/deal requests):
+- In the Data section, prefix each bullet with one of: Profile:, Opportunity:, Activity:, Talking Points:.
+- Include source links inline when available. If you cannot find any sources for a section, include "Sources: none" as a Data bullet for that section.
 
 Output:
 Return a single execution handoff in the exact format below. Use plain text (no markdown tables).
@@ -63,7 +68,7 @@ Draft:
 Current date: ${new Date().toISOString().split('T')[0]}${toolHints}${allowlist}`;
 };
 
-const buildPresenterInstructions = () => `You are Adept, an AI assistant for business operations and execution. You help teams work faster by:
+const buildPresenterInstructions = () => `You are Wayfinder, an AI assistant for business operations and execution. You help teams work faster by:
 - Answering questions using data from connected business systems
 - Executing workflows across multiple tools
 - Providing insights without users needing to open separate apps
@@ -84,6 +89,11 @@ Response style (Slack):
 - If required tools are unavailable or a tool search yields no results, say so and offer the next best step (e.g., ask to connect an integration or provide manual instructions).
 - Always cite sources when using data from integrations.
 - Format responses for Slack (use *bold*, _italic_, bullet points).
+
+Briefing format (person/company/deal questions):
+- Use these section headings in order: Profile, Opportunity, Activity, Talking Points.
+- Under each section, include concise bullets and a line labeled "Sources:" with links (or "Sources: none").
+- Close with a short agenda-offer question.
 
 Errors:
 - If a tool response includes an "error" field, explain the issue and include any provided "hint".
@@ -117,6 +127,61 @@ const buildPresenterMessages = (input: GenerationInput, handoff: string) => [
       'Using the execution handoff above, respond to the user. Do not mention the handoff or internal tools. If a follow-up question is required, ask it directly.',
   },
 ];
+
+const extractLatestUserMessage = (input: GenerationInput): string => {
+  if ('prompt' in input) {
+    return input.prompt;
+  }
+
+  for (let i = input.messages.length - 1; i >= 0; i -= 1) {
+    const message = input.messages[i];
+    if (message.role === 'user') {
+      return message.content;
+    }
+  }
+
+  return '';
+};
+
+const isBriefingRequest = (text: string): boolean => {
+  const normalized = text.toLowerCase();
+  if (!normalized) return false;
+
+  const intentSignals = [
+    'what should i know',
+    'tell me about',
+    'who is',
+    'background on',
+    'info on',
+    'information on',
+    'profile of',
+    'brief',
+    'briefing',
+    'prep',
+  ];
+
+  const entitySignals = [
+    'from ',
+    ' at ',
+    'corp',
+    'inc',
+    'llc',
+    'ltd',
+    'company',
+    'co.',
+    'account',
+    'opportunity',
+    'deal',
+    'prospect',
+    'customer',
+    'lead',
+    'contact',
+  ];
+
+  const hasIntent = intentSignals.some((signal) => normalized.includes(signal));
+  const hasEntity = entitySignals.some((signal) => normalized.includes(signal));
+  return hasIntent && hasEntity;
+};
 
 const buildExecutorRepairMessages = (input: GenerationInput, previousOutput: string) => [
   ...buildBaseMessages(input),
@@ -269,7 +334,17 @@ const generateTextResponse = async (
     logger.info({ requestId }, '[Agent] Executor handoff repaired');
   }
 
-  const presenterMessages = buildPresenterMessages(input, formatExecutionHandoff(finalHandoff));
+  const needsBriefing = isBriefingRequest(extractLatestUserMessage(input));
+  const presenterMessages = needsBriefing
+    ? [
+        ...buildPresenterMessages(input, formatExecutionHandoff(finalHandoff)),
+        {
+          role: 'user' as const,
+          content:
+            'Format this as a briefing using the required sections and include section-level sources. End with a short question offering to draft a call agenda.',
+        },
+      ]
+    : buildPresenterMessages(input, formatExecutionHandoff(finalHandoff));
 
   const presenterResponse = await generateText({
     model: presenterModel,
@@ -308,7 +383,7 @@ const getExecutorModel = () => {
     }
     if (hasAnthropic) {
       logger.warn(
-        '[Adept] DEFAULT_AI_PROVIDER=openai but OPENAI_API_KEY is missing. Falling back to Anthropic for executor.',
+        '[Wayfinder] DEFAULT_AI_PROVIDER=openai but OPENAI_API_KEY is missing. Falling back to Anthropic for executor.',
       );
       return resolveModel('anthropic', DEFAULT_MODELS.anthropic.executor);
     }
@@ -320,7 +395,7 @@ const getExecutorModel = () => {
     }
     if (hasOpenAI) {
       logger.warn(
-        '[Adept] DEFAULT_AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing. Falling back to OpenAI for executor.',
+        '[Wayfinder] DEFAULT_AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing. Falling back to OpenAI for executor.',
       );
       return resolveModel('openai', DEFAULT_MODELS.openai.executor);
     }
@@ -340,7 +415,7 @@ const getPresenterModel = () => {
     }
     if (hasAnthropic) {
       logger.warn(
-        '[Adept] DEFAULT_AI_PROVIDER=openai but OPENAI_API_KEY is missing. Falling back to Anthropic for presenter.',
+        '[Wayfinder] DEFAULT_AI_PROVIDER=openai but OPENAI_API_KEY is missing. Falling back to Anthropic for presenter.',
       );
       return resolveModel('anthropic', DEFAULT_MODELS.anthropic.presenter);
     }
@@ -352,7 +427,7 @@ const getPresenterModel = () => {
     }
     if (hasOpenAI) {
       logger.warn(
-        '[Adept] DEFAULT_AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing. Falling back to OpenAI for presenter.',
+        '[Wayfinder] DEFAULT_AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing. Falling back to OpenAI for presenter.',
       );
       return resolveModel('openai', DEFAULT_MODELS.openai.presenter);
     }

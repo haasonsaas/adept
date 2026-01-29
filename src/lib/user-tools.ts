@@ -73,8 +73,8 @@ const BLOCKED_HOSTS = [
 ];
 
 export class UserToolsManager {
-  private store = new RedisJsonStore<UserToolDefinition>('adept:user_tools');
-  private versionStore = new RedisJsonStore<UserToolDefinition[]>('adept:user_tools_versions');
+  private store = new RedisJsonStore<UserToolDefinition>('wayfinder:user_tools');
+  private versionStore = new RedisJsonStore<UserToolDefinition[]>('wayfinder:user_tools_versions');
 
   async createTool(definition: Omit<UserToolDefinition, 'id' | 'createdAt' | 'updatedAt' | 'version'>): Promise<UserToolDefinition> {
     const id = `user_${definition.name}`;

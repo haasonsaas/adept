@@ -53,7 +53,7 @@ export const buildOnboardingBlocks = (
     type: 'header',
     text: {
       type: 'plain_text',
-      text: 'Welcome to Adept',
+      text: 'Welcome to Wayfinder',
     },
   },
   {
@@ -67,7 +67,7 @@ export const buildOnboardingBlocks = (
     type: 'section',
     text: {
       type: 'mrkdwn',
-      text: '*Event triggers*\nWhen something happens, Adept takes action.\n• Fire on email, form submit, deal close, and more\n• Keyword & sender filtering\n• Webhook listeners\n• Conditional logic',
+      text: '*Event triggers*\nWhen something happens, Wayfinder takes action.\n• Fire on email, form submit, deal close, and more\n• Keyword & sender filtering\n• Webhook listeners\n• Conditional logic',
     },
   },
   {

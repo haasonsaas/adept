@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { AdeptConfig } from '../src/types/index.js';
+import type { WayfinderConfig } from '../src/types/index.js';
 import { getGitHubHealth, getGoogleDriveHealth, getSalesforceHealth } from '../src/lib/integration-config.js';
 
-const buildConfig = (): AdeptConfig => ({
+const buildConfig = (): WayfinderConfig => ({
   defaultProvider: 'openai',
   enabledIntegrations: [],
   maxToolSteps: 5,

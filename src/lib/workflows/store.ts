@@ -31,7 +31,7 @@ class MemoryWorkflowStore implements WorkflowStore {
 }
 
 class RedisWorkflowStore implements WorkflowStore {
-  private store = new RedisJsonStore<Workflow>('adept:workflows');
+  private store = new RedisJsonStore<Workflow>('wayfinder:workflows');
 
   async get(id: string): Promise<Workflow | null> {
     return await this.store.get(id);

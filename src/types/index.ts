@@ -32,7 +32,7 @@ export interface ConversationContext {
   teamId?: string;
 }
 
-export interface AdeptConfig {
+export interface WayfinderConfig {
   defaultProvider: 'openai' | 'anthropic';
   executorModel?: string;
   presenterModel?: string;

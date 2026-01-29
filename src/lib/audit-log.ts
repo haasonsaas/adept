@@ -51,11 +51,11 @@ const SENSITIVE_KEYS = [
 ];
 
 const REDIS_RETENTION_DAYS = 7;
-const ARCHIVE_DIR = join(homedir(), '.adept', 'audit_logs');
+const ARCHIVE_DIR = join(homedir(), '.wayfinder', 'audit_logs');
 
 export class AuditLogger {
-  private store = new RedisJsonStore<AuditEntry>('adept:audit_log');
-  private indexStore = new RedisJsonStore<string[]>('adept:audit_index');
+  private store = new RedisJsonStore<AuditEntry>('wayfinder:audit_log');
+  private indexStore = new RedisJsonStore<string[]>('wayfinder:audit_index');
 
   async log(entry: Omit<AuditEntry, 'id' | 'timestamp'>): Promise<string> {
     const id = randomUUID();

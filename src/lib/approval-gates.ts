@@ -48,9 +48,9 @@ const SENSITIVE_TOOLS = [
 ];
 
 export class ApprovalGateManager {
-  private store = new RedisJsonStore<ApprovalGate>('adept:approval_gates');
-  private pendingStore = new RedisJsonStore<string[]>('adept:pending_approvals');
-  private configStore = new RedisJsonStore<ApprovalConfig>('adept:approval_config');
+  private store = new RedisJsonStore<ApprovalGate>('wayfinder:approval_gates');
+  private pendingStore = new RedisJsonStore<string[]>('wayfinder:pending_approvals');
+  private configStore = new RedisJsonStore<ApprovalConfig>('wayfinder:approval_config');
   private config: ApprovalConfig = {
     requireApprovalFor: {
       methods: ['DELETE'],

@@ -100,8 +100,8 @@ class MemoryIdentityStore implements IdentityStore {
 }
 
 class RedisIdentityStore implements IdentityStore {
-  private userStore = new RedisJsonStore<ScimUser>('adept:scim_users');
-  private groupStore = new RedisJsonStore<ScimGroup>('adept:scim_groups');
+  private userStore = new RedisJsonStore<ScimUser>('wayfinder:scim_users');
+  private groupStore = new RedisJsonStore<ScimGroup>('wayfinder:scim_groups');
 
   async listUsers(): Promise<ScimUser[]> {
     return await this.userStore.list();

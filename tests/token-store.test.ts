@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { TokenStore } from '../src/lib/token-store.js';
 
 const createTempPath = async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'adept-token-store-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wayfinder-token-store-'));
   return path.join(dir, 'tokens.json');
 };
 

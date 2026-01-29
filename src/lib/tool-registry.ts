@@ -39,7 +39,7 @@ const MIN_HOT_TOOLS = 5;
 export class ToolRegistry {
   private tools: Map<string, ToolMetadata> = new Map();
   private toolImplementations: Map<string, ToolSet[string]> = new Map();
-  private usageStore = new RedisJsonStore<ToolUsageRecord>('adept:tool_usage');
+  private usageStore = new RedisJsonStore<ToolUsageRecord>('wayfinder:tool_usage');
   private hotTools: Set<string> = new Set();
 
   private resolveInputSchema(toolDef: ToolSet[string]): z.ZodSchema {

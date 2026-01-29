@@ -29,7 +29,7 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_HOURS = 8;
 
 const stateStore = new Map<string, { createdAt: number }>();
-const sessionStore = new RedisJsonStore<SsoSession>('adept:sso_sessions');
+const sessionStore = new RedisJsonStore<SsoSession>('wayfinder:sso_sessions');
 const sessionCache = new Map<string, SsoSession>();
 
 const clearExpiredStates = () => {

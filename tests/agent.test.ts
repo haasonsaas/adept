@@ -73,10 +73,10 @@ describe('generateResponse', () => {
 
     expect(mockGenerateText).toHaveBeenNthCalledWith(1, expect.objectContaining({
       prompt: 'Hi',
-      system: expect.stringContaining('Adept Executor'),
+      system: expect.stringContaining('Wayfinder Executor'),
     }));
     expect(mockGenerateText).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      system: expect.stringContaining('You are Adept, an AI assistant'),
+      system: expect.stringContaining('You are Wayfinder, an AI assistant'),
       messages: expect.any(Array),
     }));
     expect(response).toBe('Hello world');

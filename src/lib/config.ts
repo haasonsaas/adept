@@ -1,9 +1,9 @@
-import type { AdeptConfig } from '../types/index.js';
+import type { WayfinderConfig } from '../types/index.js';
 import { logger } from './logger.js';
 
-let cachedConfig: AdeptConfig | null = null;
+let cachedConfig: WayfinderConfig | null = null;
 
-const resolveDefaultProvider = (): AdeptConfig['defaultProvider'] => {
+const resolveDefaultProvider = (): WayfinderConfig['defaultProvider'] => {
   const raw = process.env.DEFAULT_AI_PROVIDER?.toLowerCase();
   if (raw === 'openai' || raw === 'anthropic') {
     return raw;
@@ -43,7 +43,7 @@ const parseOptionalNumber = (value?: string): number | undefined => {
   return parsed;
 };
 
-const buildConfig = (): AdeptConfig => {
+const buildConfig = (): WayfinderConfig => {
   const oauthPort = Number(process.env.OAUTH_PORT || 3999);
   const oauthBaseUrl = process.env.OAUTH_BASE_URL || `http://localhost:${oauthPort}`;
   const monitoringSeverity = process.env.MONITORING_MIN_SEVERITY?.toLowerCase();
@@ -139,7 +139,7 @@ const buildConfig = (): AdeptConfig => {
   };
 };
 
-export function loadConfig(): AdeptConfig {
+export function loadConfig(): WayfinderConfig {
   if (!cachedConfig) {
     cachedConfig = buildConfig();
   }

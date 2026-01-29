@@ -56,7 +56,7 @@ describe('handleCommand', () => {
       const result = await handleCommand('help');
 
       expect(result).not.toBeNull();
-      expect(result?.text).toContain('Welcome to Adept');
+      expect(result?.text).toContain('Welcome to Wayfinder');
       expect(result?.blocks).toBeDefined();
     });
 
@@ -64,14 +64,14 @@ describe('handleCommand', () => {
       const result = await handleCommand('hello');
 
       expect(result).not.toBeNull();
-      expect(result?.text).toContain('Welcome to Adept');
+      expect(result?.text).toContain('Welcome to Wayfinder');
     });
 
     it('responds to "hi"', async () => {
       const result = await handleCommand('hi');
 
       expect(result).not.toBeNull();
-      expect(result?.text).toContain('Welcome to Adept');
+      expect(result?.text).toContain('Welcome to Wayfinder');
     });
   });
 

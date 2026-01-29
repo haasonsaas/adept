@@ -42,7 +42,7 @@ class MemoryMonitoringStore implements MonitoringStore {
 }
 
 class RedisMonitoringStore implements MonitoringStore {
-  private store = new RedisJsonStore<MonitoringConfig>('adept:monitoring_config');
+  private store = new RedisJsonStore<MonitoringConfig>('wayfinder:monitoring_config');
   private cache: MonitoringConfig | null = null;
 
   async getConfig(): Promise<MonitoringConfig> {

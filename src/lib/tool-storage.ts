@@ -24,12 +24,12 @@ interface ToolVersion {
   savedAt: string;
 }
 
-const TOOLS_DIR = join(homedir(), '.adept', 'tools');
+const TOOLS_DIR = join(homedir(), '.wayfinder', 'tools');
 const MAX_VERSIONS = 5;
 
 export class ToolStorage {
-  private store = new RedisJsonStore<StoredTool>('adept:stored_tools');
-  private versionStore = new RedisJsonStore<ToolVersion[]>('adept:tool_versions');
+  private store = new RedisJsonStore<StoredTool>('wayfinder:stored_tools');
+  private versionStore = new RedisJsonStore<ToolVersion[]>('wayfinder:tool_versions');
   private initialized = false;
 
   private async ensureDir(): Promise<void> {

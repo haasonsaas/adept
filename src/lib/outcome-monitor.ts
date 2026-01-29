@@ -58,9 +58,9 @@ const ANOMALY_THRESHOLD_LATENCY = 2.0;
 const ANOMALY_THRESHOLD_VOLUME = 0.5;
 
 export class OutcomeMonitor {
-  private recordsStore = new RedisJsonStore<OutcomeRecord[]>('adept:outcome_records');
-  private metricsCache = new RedisJsonStore<OutcomeMetrics>('adept:outcome_metrics');
-  private anomaliesStore = new RedisJsonStore<Anomaly[]>('adept:anomalies');
+  private recordsStore = new RedisJsonStore<OutcomeRecord[]>('wayfinder:outcome_records');
+  private metricsCache = new RedisJsonStore<OutcomeMetrics>('wayfinder:outcome_metrics');
+  private anomaliesStore = new RedisJsonStore<Anomaly[]>('wayfinder:anomalies');
 
   async recordOutcome(
     tool: string,

@@ -184,7 +184,7 @@ export class DynamicToolExecutor {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'User-Agent': 'Adept/1.0',
+      'User-Agent': 'Wayfinder/1.0',
     };
 
     if (context.authCredentials) {

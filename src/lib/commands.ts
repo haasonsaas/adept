@@ -46,8 +46,8 @@ const buildOnboardingResponse = async (): Promise<CommandResponse> => {
   );
 
   const text =
-    "Welcome to Adept. I'm here to help with your connected business tools. " +
-    'Ask questions in DMs or mention @Adept in a channel. ' +
+    "Welcome to Wayfinder. I'm here to help with your connected business tools. " +
+    'Ask questions in DMs or mention @Wayfinder in a channel. ' +
     'Use "oauth status" to view connections or "connect <integration>" to authorize.';
   const blocks = buildOnboardingBlocks(connectLinks, baseUrl, oauthEnabled);
 

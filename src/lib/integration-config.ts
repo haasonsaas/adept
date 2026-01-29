@@ -1,4 +1,4 @@
-import type { AdeptConfig } from '../types/index.js';
+import type { WayfinderConfig } from '../types/index.js';
 import { loadConfig } from './config.js';
 import { tokenStore } from './token-store.js';
 
@@ -27,7 +27,7 @@ export interface IntegrationHealth {
 }
 
 interface EnablementOptions<TTokens> {
-  config?: AdeptConfig;
+  config?: WayfinderConfig;
   tokens?: TTokens | null;
   env?: NodeJS.ProcessEnv;
 }
@@ -70,7 +70,7 @@ const buildEnablement = (missing: string[]): IntegrationEnablement => ({
 const hasEnvValue = (env: NodeJS.ProcessEnv, keys: string[]) =>
   keys.some((key) => hasValue(env[key]));
 
-const resolveConfig = (config?: AdeptConfig) => config ?? loadConfig();
+const resolveConfig = (config?: WayfinderConfig) => config ?? loadConfig();
 
 const resolveTokens = <TTokens extends Record<string, unknown>>(
   integrationId: string,

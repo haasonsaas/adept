@@ -30,7 +30,7 @@ const bootstrap = async () => {
   monitoringService.start();
 
   const config = loadConfig();
-  logger.info(`[Adept] Starting with provider: ${config.defaultProvider}`);
+  logger.info(`[Wayfinder] Starting with provider: ${config.defaultProvider}`);
 
   const shouldStartOAuth = config.oauthServerEnabled;
   if (shouldStartOAuth) {
@@ -48,7 +48,7 @@ const bootstrap = async () => {
       }
       await handleAppMention(event);
     } catch (error) {
-      logger.error({ error }, '[Adept] Error handling app_mention');
+      logger.error({ error }, '[Wayfinder] Error handling app_mention');
     }
   });
 
@@ -64,7 +64,7 @@ const bootstrap = async () => {
       try {
         await handleDirectMessage(msg);
       } catch (error) {
-        logger.error({ error }, '[Adept] Error handling DM');
+        logger.error({ error }, '[Wayfinder] Error handling DM');
       }
     }
   });
@@ -77,16 +77,16 @@ const bootstrap = async () => {
       }
       await handleAssistantThreadStarted(event);
     } catch (error) {
-      logger.error({ error }, '[Adept] Error handling assistant_thread_started');
+      logger.error({ error }, '[Wayfinder] Error handling assistant_thread_started');
     }
   });
 
   await app.start();
-  logger.info('[Adept] Bot is running!');
-  logger.info('[Adept] Mention @Adept in any channel or send a DM to get started.');
+  logger.info('[Wayfinder] Bot is running!');
+  logger.info('[Wayfinder] Mention @Wayfinder in any channel or send a DM to get started.');
 };
 
 bootstrap().catch((error) => {
-  logger.fatal({ error }, '[Adept] Failed to start');
+  logger.fatal({ error }, '[Wayfinder] Failed to start');
   process.exit(1);
 });

@@ -47,7 +47,7 @@ const TOOL_SPECIFIC_LIMITS: Record<string, Partial<RateLimitConfig>> = {
 };
 
 export class RateLimiter {
-  private store = new RedisJsonStore<RateLimitRecord>('adept:rate_limits');
+  private store = new RedisJsonStore<RateLimitRecord>('wayfinder:rate_limits');
   private customLimits: Map<string, RateLimitConfig> = new Map();
 
   constructor() {
