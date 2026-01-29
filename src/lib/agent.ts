@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { generateText, stepCountIs, tool } from 'ai';
-import type { ToolSet } from 'ai';
+import type { ToolExecuteFunction, ToolExecutionOptions, ToolSet } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
@@ -69,6 +70,47 @@ const updateToolStatus = async (
   }
 };
 
+const formatSlackText = (text: string) =>
+  text.replace(/\[(.*?)\]\((.*?)\)/g, '<$2|$1>').replace(/\*\*/g, '*');
+
+type GenerationInput =
+  | { prompt: string }
+  | { messages: Array<{ role: 'user' | 'assistant'; content: string }> };
+
+const generateTextResponse = async (
+  input: GenerationInput,
+  onStatusUpdate?: (status: string) => Promise<void>,
+): Promise<string> => {
+  const config = loadConfig();
+  const model = getModel();
+  const requestId = randomUUID();
+  const tools = getAllTools(requestId);
+
+  await onStatusUpdate?.('is thinking...');
+
+  const request =
+    'prompt' in input
+      ? { prompt: input.prompt }
+      : { messages: input.messages };
+
+  logger.info({ requestId }, '[Agent] Request started');
+
+  const { text } = await generateText({
+    model,
+    system: buildSystemInstructions(),
+    ...request,
+    tools,
+    stopWhen: stepCountIs(config.maxToolSteps),
+    onStepFinish: async ({ toolCalls, toolResults }) => {
+      await updateToolStatus(toolCalls, toolResults, onStatusUpdate);
+    },
+  });
+
+  logger.info({ requestId }, '[Agent] Request completed');
+
+  return formatSlackText(text);
+};
+
 function getModel() {
   const config = loadConfig();
   const hasAnthropic = !!config.anthropicApiKey;
@@ -101,33 +143,74 @@ function getModel() {
   throw new Error('No AI provider configured');
 }
 
-function getAllTools(): ToolSet {
+const wrapToolExecution = (
+  toolName: string,
+  toolDef: ToolSet[string],
+  requestId: string,
+  integrationId: string,
+): ToolSet[string] => {
+  const execute = toolDef.execute as ToolExecuteFunction<unknown, unknown> | undefined;
+  if (typeof execute !== 'function') {
+    return toolDef;
+  }
+
+  return {
+    ...toolDef,
+    execute: async (input: unknown, context: ToolExecutionOptions) => {
+      const start = Date.now();
+      try {
+        const result = await execute(input, context);
+        logger.info({ requestId, toolName, integrationId, durationMs: Date.now() - start }, '[Agent] Tool execution');
+        return result;
+      } catch (error) {
+        logger.error(
+          { requestId, toolName, integrationId, durationMs: Date.now() - start, error },
+          '[Agent] Tool execution failed',
+        );
+        throw error;
+      }
+    },
+  };
+};
+
+function getAllTools(requestId: string): ToolSet {
   const allTools: ToolSet = {};
 
   for (const integration of integrationRegistry.getEnabled()) {
     const integrationTools = integration.getTools();
 
     for (const [toolName, toolDef] of Object.entries(integrationTools)) {
-      allTools[`${integration.id}_${toolName}`] = toolDef;
+      const qualifiedName = `${integration.id}_${toolName}`;
+      allTools[qualifiedName] = wrapToolExecution(
+        qualifiedName,
+        toolDef,
+        requestId,
+        integration.id,
+      );
     }
   }
 
   // Built-in utility tools
-  allTools['get_current_time'] = tool({
-    description: 'Get the current date and time',
-    inputSchema: z.object({
-      timezone: z.string().optional().describe('Timezone like "America/New_York"'),
+  allTools['get_current_time'] = wrapToolExecution(
+    'get_current_time',
+    tool({
+      description: 'Get the current date and time',
+      inputSchema: z.object({
+        timezone: z.string().optional().describe('Timezone like "America/New_York"'),
+      }),
+      execute: async ({ timezone }: { timezone?: string }) => {
+        const now = new Date();
+        const options: Intl.DateTimeFormatOptions = {
+          dateStyle: 'full',
+          timeStyle: 'long',
+          timeZone: timezone || 'UTC',
+        };
+        return { datetime: now.toLocaleString('en-US', options) };
+      },
     }),
-    execute: async ({ timezone }: { timezone?: string }) => {
-      const now = new Date();
-      const options: Intl.DateTimeFormatOptions = {
-        dateStyle: 'full',
-        timeStyle: 'long',
-        timeZone: timezone || 'UTC',
-      };
-      return { datetime: now.toLocaleString('en-US', options) };
-    },
-  });
+    requestId,
+    'core',
+  );
 
   return allTools;
 }
@@ -136,50 +219,20 @@ export async function generateResponse(
   prompt: string,
   onStatusUpdate?: (status: string) => Promise<void>,
 ): Promise<string> {
-  const config = loadConfig();
-  const model = getModel();
-  const tools = getAllTools();
-
-  await onStatusUpdate?.('is thinking...');
-
-  const { text } = await generateText({
-    model,
-    system: buildSystemInstructions(),
-    prompt,
-    tools,
-    stopWhen: stepCountIs(config.maxToolSteps),
-    onStepFinish: async ({ toolCalls, toolResults }) => {
-      await updateToolStatus(toolCalls, toolResults, onStatusUpdate);
-    },
-  });
-
-  // Convert markdown links to Slack format
-  return text.replace(/\[(.*?)\]\((.*?)\)/g, '<$2|$1>').replace(/\*\*/g, '*');
+  return await generateTextResponse({ prompt }, onStatusUpdate);
 }
 
 export async function generateResponseWithHistory(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   onStatusUpdate?: (status: string) => Promise<void>,
 ): Promise<string> {
-  const config = loadConfig();
-  const model = getModel();
-  const tools = getAllTools();
-
-  await onStatusUpdate?.('is thinking...');
-
-  const { text } = await generateText({
-    model,
-    system: buildSystemInstructions(),
-    messages: messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    })),
-    tools,
-    stopWhen: stepCountIs(config.maxToolSteps),
-    onStepFinish: async ({ toolCalls, toolResults }) => {
-      await updateToolStatus(toolCalls, toolResults, onStatusUpdate);
+  return await generateTextResponse(
+    {
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
     },
-  });
-
-  return text.replace(/\[(.*?)\]\((.*?)\)/g, '<$2|$1>').replace(/\*\*/g, '*');
+    onStatusUpdate,
+  );
 }

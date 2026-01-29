@@ -11,6 +11,7 @@ import type { SearchResult } from '../types/index.js';
 import { loadConfig } from '../lib/config.js';
 import { getSalesforceEnablement } from '../lib/integration-config.js';
 import { logger } from '../lib/logger.js';
+import { buildOAuthRedirectUri, normalizeBaseUrl } from '../lib/oauth.js';
 
 const DEFAULT_LOGIN_URL = 'https://login.salesforce.com';
 const TOKEN_TTL_MS = 45 * 60 * 1000;
@@ -147,7 +148,7 @@ class SalesforceClient {
     this.clientId = config.clientId;
     this.clientSecret = config.clientSecret;
     this.refreshToken = config.refreshToken;
-    this.loginUrl = config.loginUrl.replace(/\/$/, '');
+    this.loginUrl = normalizeBaseUrl(config.loginUrl);
     this.accessToken = config.accessToken;
     this.instanceUrl = config.instanceUrl;
     this.expiresAt = config.expiresAt;
@@ -264,13 +265,13 @@ export class SalesforceIntegration extends BaseIntegration {
     return {
       getAuthUrl: (baseUrl: string, state: string) => {
         const config = loadConfig();
-        const loginUrl = (config.salesforce?.loginUrl || DEFAULT_LOGIN_URL).replace(/\/$/, '');
+        const loginUrl = normalizeBaseUrl(config.salesforce?.loginUrl || DEFAULT_LOGIN_URL);
         const clientId = config.salesforce?.clientId;
         if (!clientId) {
           throw new Error('Missing SALESFORCE_CLIENT_ID');
         }
 
-        const redirectUri = config.salesforce?.redirectUri || `${baseUrl}/oauth/salesforce/callback`;
+        const redirectUri = buildOAuthRedirectUri(baseUrl, this.id, config.salesforce?.redirectUri);
 
         const url = new URL(`${loginUrl}/services/oauth2/authorize`);
         url.searchParams.set('response_type', 'code');
@@ -287,8 +288,8 @@ export class SalesforceIntegration extends BaseIntegration {
         }
 
         const config = loadConfig();
-        const redirectUri = config.salesforce?.redirectUri || `${baseUrl}/oauth/salesforce/callback`;
-        const loginUrl = (config.salesforce?.loginUrl || DEFAULT_LOGIN_URL).replace(/\/$/, '');
+        const redirectUri = buildOAuthRedirectUri(baseUrl, this.id, config.salesforce?.redirectUri);
+        const loginUrl = normalizeBaseUrl(config.salesforce?.loginUrl || DEFAULT_LOGIN_URL);
         const clientId = config.salesforce?.clientId;
         const clientSecret = config.salesforce?.clientSecret;
 
@@ -482,7 +483,7 @@ export class SalesforceIntegration extends BaseIntegration {
     const clientSecret = config.salesforce?.clientSecret;
     const storedTokens = await tokenStore.getTokens<SalesforceStoredTokens>(this.id);
     const refreshToken = storedTokens?.refreshToken || process.env.SALESFORCE_REFRESH_TOKEN;
-    const loginUrl = config.salesforce?.loginUrl || DEFAULT_LOGIN_URL;
+    const loginUrl = normalizeBaseUrl(config.salesforce?.loginUrl || DEFAULT_LOGIN_URL);
 
     if (!clientId || !clientSecret || !refreshToken) {
       throw new IntegrationAuthError('Salesforce credentials are missing.', {

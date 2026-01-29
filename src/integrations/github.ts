@@ -10,6 +10,7 @@ import type { SearchResult } from '../types/index.js';
 import { loadConfig } from '../lib/config.js';
 import { getGitHubEnablement } from '../lib/integration-config.js';
 import { logger } from '../lib/logger.js';
+import { buildOAuthRedirectUri, normalizeBaseUrl } from '../lib/oauth.js';
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -56,7 +57,8 @@ const resolveRepo = (repoInput?: string) => {
   return null;
 };
 
-const getOAuthBaseUrl = () => (process.env.GITHUB_OAUTH_BASE_URL || DEFAULT_OAUTH_BASE_URL).replace(/\/$/, '');
+const getGitHubOAuthBaseUrl = () =>
+  normalizeBaseUrl(process.env.GITHUB_OAUTH_BASE_URL || DEFAULT_OAUTH_BASE_URL);
 
 const refreshGitHubToken = async (
   refreshToken: string,
@@ -73,7 +75,7 @@ const refreshGitHubToken = async (
     });
   }
 
-  const baseUrl = getOAuthBaseUrl();
+  const baseUrl = getGitHubOAuthBaseUrl();
   const body = new URLSearchParams({
     client_id: clientId,
     client_secret: clientSecret,
@@ -201,8 +203,8 @@ export class GitHubIntegration extends BaseIntegration {
           throw new Error('Missing GITHUB_OAUTH_CLIENT_ID');
         }
 
-        const redirectUri = config.github?.oauthRedirectUri || `${baseUrl}/oauth/github/callback`;
-        const authBaseUrl = (process.env.GITHUB_OAUTH_BASE_URL || DEFAULT_OAUTH_BASE_URL).replace(/\/$/, '');
+        const redirectUri = buildOAuthRedirectUri(baseUrl, this.id, config.github?.oauthRedirectUri);
+        const authBaseUrl = getGitHubOAuthBaseUrl();
         
         const url = new URL(`${authBaseUrl}/login/oauth/authorize`);
         url.searchParams.set('client_id', clientId);
@@ -227,8 +229,8 @@ export class GitHubIntegration extends BaseIntegration {
           throw new Error('Missing GITHUB_OAUTH_CLIENT_ID or GITHUB_OAUTH_CLIENT_SECRET');
         }
 
-        const redirectUri = config.github?.oauthRedirectUri || `${baseUrl}/oauth/github/callback`;
-        const authBaseUrl = (process.env.GITHUB_OAUTH_BASE_URL || DEFAULT_OAUTH_BASE_URL).replace(/\/$/, '');
+        const redirectUri = buildOAuthRedirectUri(baseUrl, this.id, config.github?.oauthRedirectUri);
+        const authBaseUrl = getGitHubOAuthBaseUrl();
         
         const body = new URLSearchParams({
           client_id: clientId,

@@ -1,8 +1,8 @@
-import { generateResponse, generateResponseWithHistory } from '../lib/agent.js';
 import { slackService } from '../lib/slack.js';
-import { handleCommand } from '../lib/commands.js';
 import type { AppMentionEvent } from '../types/slack.js';
 import { logger } from '../lib/logger.js';
+import { DEFAULT_ERROR_MESSAGE, runAssistantFlow } from './assistant-flow.js';
+import type { KnownBlock } from '@slack/web-api';
 
 export async function handleAppMention(event: AppMentionEvent): Promise<void> {
   const { channel, thread_ts, ts, text, bot_id } = event;
@@ -28,37 +28,25 @@ export async function handleAppMention(event: AppMentionEvent): Promise<void> {
     await slackService.updateMessage(channel, thinkingTs, `_${status}_`);
   };
 
-  try {
-    let response: string;
+  const cleanedText = text.replace(new RegExp(`<@${botUserId}>\\s*`, 'g'), '').trim();
 
-    const cleanedText = text.replace(new RegExp(`<@${botUserId}>\\s*`, 'g'), '').trim();
-    const commandResponse = await handleCommand(cleanedText);
-    if (commandResponse) {
-      await slackService.updateMessage(
-        channel,
-        thinkingTs,
-        commandResponse.text,
-        commandResponse.blocks,
-      );
+  const sendResponse = async (responseText: string, blocks?: KnownBlock[]) => {
+    if (blocks) {
+      await slackService.updateMessage(channel, thinkingTs, responseText, blocks);
       return;
     }
+    await slackService.updateMessage(channel, thinkingTs, responseText);
+  };
 
-    if (thread_ts) {
-      // Get full thread context
-      const messages = await slackService.getThreadMessages(channel, thread_ts, botUserId);
-      response = await generateResponseWithHistory(messages, updateStatus);
-    } else {
-      // Single message - remove the mention
-      response = await generateResponse(cleanedText, updateStatus);
-    }
-
-    await slackService.updateMessage(channel, thinkingTs, response);
-  } catch (error) {
-    logger.error({ error, channel, threadTs }, '[AppMention] Error generating response');
-    await slackService.updateMessage(
-      channel,
-      thinkingTs,
-      '_Sorry, I encountered an error processing your request._',
-    );
-  }
+  await runAssistantFlow({
+    text: cleanedText,
+    threadTs: thread_ts,
+    getThreadMessages: thread_ts
+      ? () => slackService.getThreadMessages(channel, thread_ts, botUserId)
+      : undefined,
+    onStatusUpdate: updateStatus,
+    sendResponse,
+    errorMessage: DEFAULT_ERROR_MESSAGE,
+    onError: (error) => logger.error({ error, channel, threadTs }, '[AppMention] Error generating response'),
+  });
 }

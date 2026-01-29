@@ -11,10 +11,12 @@ import type { SearchResult } from '../types/index.js';
 import { loadConfig } from '../lib/config.js';
 import { getGoogleDriveEnablement } from '../lib/integration-config.js';
 import { logger } from '../lib/logger.js';
+import { buildOAuthRedirectUri } from '../lib/oauth.js';
 
 const MAX_TEXT_CHARS = 20000;
 const MAX_BINARY_BYTES = 1024 * 1024;
 const AUTH_HINT = 'Run "oauth status" in Slack to review Google Drive connection links.';
+const GOOGLE_DRIVE_OAUTH_PATH = 'google-drive';
 
 interface DriveAuthConfig {
   clientId: string;
@@ -154,7 +156,11 @@ export class GoogleDriveIntegration extends BaseIntegration {
           throw new Error('Missing GOOGLE_DRIVE_CLIENT_ID or GOOGLE_DRIVE_CLIENT_SECRET');
         }
 
-        const redirectUri = config.googleDrive?.redirectUri || `${baseUrl}/oauth/google-drive/callback`;
+        const redirectUri = buildOAuthRedirectUri(
+          baseUrl,
+          GOOGLE_DRIVE_OAUTH_PATH,
+          config.googleDrive?.redirectUri,
+        );
 
         const oauth = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
         return oauth.generateAuthUrl({
@@ -180,7 +186,11 @@ export class GoogleDriveIntegration extends BaseIntegration {
           throw new Error('Missing GOOGLE_DRIVE_CLIENT_ID or GOOGLE_DRIVE_CLIENT_SECRET');
         }
 
-        const redirectUri = config.googleDrive?.redirectUri || `${baseUrl}/oauth/google-drive/callback`;
+        const redirectUri = buildOAuthRedirectUri(
+          baseUrl,
+          GOOGLE_DRIVE_OAUTH_PATH,
+          config.googleDrive?.redirectUri,
+        );
 
         const oauth = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
         const { tokens } = await oauth.getToken(code);

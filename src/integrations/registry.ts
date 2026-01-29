@@ -18,6 +18,10 @@ class IntegrationRegistry {
     return Array.from(this.integrations.values());
   }
 
+  clear(): void {
+    this.integrations.clear();
+  }
+
   getEnabled(): Integration[] {
     const config = loadConfig();
     const allowlist = new Set(config.enabledIntegrations.map((id) => id.trim()).filter(Boolean));
@@ -30,6 +34,29 @@ class IntegrationRegistry {
       }
       return allowlist.has(integration.id);
     });
+  }
+
+  resolveId(input: string): string | null {
+    const value = input.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (!value) {
+      return null;
+    }
+
+    const allIntegrations = this.getAll();
+    const match = allIntegrations.find((integration) =>
+      integration.id.toLowerCase() === value ||
+      integration.name.toLowerCase().replace(/[^a-z0-9]/g, '') === value,
+    );
+
+    if (match) {
+      return match.id;
+    }
+
+    if (value.includes('salesforce') || value.includes('sf')) return 'salesforce';
+    if (value.includes('github') || value.includes('gh')) return 'github';
+    if (value.includes('drive') || value.includes('google')) return 'google_drive';
+
+    return null;
   }
 
   async searchAll(query: string): Promise<SearchResult[]> {

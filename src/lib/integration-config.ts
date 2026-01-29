@@ -7,6 +7,25 @@ export interface IntegrationEnablement {
   missing: string[];
 }
 
+export type IntegrationTokenSource = 'env' | 'store' | 'none';
+
+export interface IntegrationTokenHealth {
+  source: IntegrationTokenSource;
+  hasTokens: boolean;
+  expiresAt?: number;
+  refreshTokenExpiresAt?: number;
+  updatedAt?: string;
+  expired?: boolean;
+  refreshTokenExpired?: boolean;
+}
+
+export interface IntegrationHealth {
+  integrationId: string;
+  enabled: boolean;
+  missing: string[];
+  token: IntegrationTokenHealth;
+}
+
 interface EnablementOptions<TTokens> {
   config?: AdeptConfig;
   tokens?: TTokens | null;
@@ -16,17 +35,40 @@ interface EnablementOptions<TTokens> {
 type GitHubTokens = Record<string, unknown> & {
   accessToken?: string;
   refreshToken?: string;
+  expiresAt?: number;
+  refreshTokenExpiresAt?: number;
+  updatedAt?: string;
 };
 
 type GoogleDriveTokens = Record<string, unknown> & {
   refreshToken?: string;
+  accessToken?: string;
+  expiryDate?: number;
+  updatedAt?: string;
 };
 
 type SalesforceTokens = Record<string, unknown> & {
   refreshToken?: string;
+  accessToken?: string;
+  expiresAt?: number;
+  updatedAt?: string;
 };
 
 const hasValue = (value?: string) => typeof value === 'string' && value.trim().length > 0;
+
+const addMissing = (missing: string[], condition: boolean, label: string) => {
+  if (condition) {
+    missing.push(label);
+  }
+};
+
+const buildEnablement = (missing: string[]): IntegrationEnablement => ({
+  enabled: missing.length === 0,
+  missing,
+});
+
+const hasEnvValue = (env: NodeJS.ProcessEnv, keys: string[]) =>
+  keys.some((key) => hasValue(env[key]));
 
 const resolveConfig = (config?: AdeptConfig) => config ?? loadConfig();
 
@@ -40,6 +82,67 @@ const resolveTokens = <TTokens extends Record<string, unknown>>(
   return tokenStore.getCachedTokens<TTokens>(integrationId);
 };
 
+const buildTokenHealth = (params: {
+  source: IntegrationTokenSource;
+  hasTokens: boolean;
+  expiresAt?: number;
+  refreshTokenExpiresAt?: number;
+  updatedAt?: string;
+  now: number;
+}): IntegrationTokenHealth => {
+  const token: IntegrationTokenHealth = {
+    source: params.source,
+    hasTokens: params.hasTokens,
+  };
+
+  if (typeof params.expiresAt === 'number') {
+    token.expiresAt = params.expiresAt;
+    token.expired = params.now >= params.expiresAt;
+  }
+
+  if (typeof params.refreshTokenExpiresAt === 'number') {
+    token.refreshTokenExpiresAt = params.refreshTokenExpiresAt;
+    token.refreshTokenExpired = params.now >= params.refreshTokenExpiresAt;
+  }
+
+  if (params.updatedAt) {
+    token.updatedAt = params.updatedAt;
+  }
+
+  return token;
+};
+
+const resolveRefreshToken = (
+  env: NodeJS.ProcessEnv,
+  tokens?: { refreshToken?: string } | null,
+  envKeys: string[] = [],
+): boolean => hasEnvValue(env, envKeys) || hasValue(tokens?.refreshToken);
+
+const getStandardOAuthEnablement = (
+  options: {
+    configValues: Array<{ value?: string; label: string }>;
+    env: NodeJS.ProcessEnv;
+    refreshTokenEnvKeys: string[];
+    refreshTokenLabel: string;
+    tokens?: { refreshToken?: string } | null;
+  },
+): IntegrationEnablement => {
+  const missing: string[] = [];
+
+  for (const entry of options.configValues) {
+    addMissing(missing, !hasValue(entry.value), entry.label);
+  }
+
+  const hasRefreshToken = resolveRefreshToken(
+    options.env,
+    options.tokens,
+    options.refreshTokenEnvKeys,
+  );
+  addMissing(missing, !hasRefreshToken, options.refreshTokenLabel);
+
+  return buildEnablement(missing);
+};
+
 export const getGitHubEnablement = (
   options: EnablementOptions<GitHubTokens> = {},
 ): IntegrationEnablement => {
@@ -47,9 +150,9 @@ export const getGitHubEnablement = (
   const env = options.env ?? process.env;
   const tokens = resolveTokens<GitHubTokens>('github', options.tokens);
 
-  const hasEnvToken = hasValue(env.GITHUB_OAUTH_TOKEN) || hasValue(env.GITHUB_TOKEN);
+  const hasEnvToken = hasEnvValue(env, ['GITHUB_OAUTH_TOKEN', 'GITHUB_TOKEN']);
   if (hasEnvToken) {
-    return { enabled: true, missing: [] };
+    return buildEnablement([]);
   }
 
   const hasAccessToken = hasValue(tokens?.accessToken);
@@ -59,21 +162,10 @@ export const getGitHubEnablement = (
 
   const missing: string[] = [];
 
-  if (!hasAccessToken && !hasRefreshToken) {
-    missing.push('GITHUB_OAUTH_TOKEN or stored OAuth tokens');
-  }
-
-  if (hasAccessToken && !hasRefreshToken) {
-    missing.push('GITHUB_REFRESH_TOKEN');
-  }
-
-  if (hasRefreshToken && !hasClientId) {
-    missing.push('GITHUB_OAUTH_CLIENT_ID');
-  }
-
-  if (hasRefreshToken && !hasClientSecret) {
-    missing.push('GITHUB_OAUTH_CLIENT_SECRET');
-  }
+  addMissing(missing, !hasAccessToken && !hasRefreshToken, 'GITHUB_OAUTH_TOKEN or stored OAuth tokens');
+  addMissing(missing, hasAccessToken && !hasRefreshToken, 'GITHUB_REFRESH_TOKEN');
+  addMissing(missing, hasRefreshToken && !hasClientId, 'GITHUB_OAUTH_CLIENT_ID');
+  addMissing(missing, hasRefreshToken && !hasClientSecret, 'GITHUB_OAUTH_CLIENT_SECRET');
 
   const enabled = missing.length === 0 && (hasAccessToken || hasRefreshToken);
   return { enabled, missing };
@@ -85,28 +177,18 @@ export const getGoogleDriveEnablement = (
   const config = resolveConfig(options.config);
   const env = options.env ?? process.env;
   const tokens = resolveTokens<GoogleDriveTokens>('google_drive', options.tokens);
-  const missing: string[] = [];
 
-  if (!hasValue(config.googleDrive?.clientId)) {
-    missing.push('GOOGLE_DRIVE_CLIENT_ID');
-  }
-
-  if (!hasValue(config.googleDrive?.clientSecret)) {
-    missing.push('GOOGLE_DRIVE_CLIENT_SECRET');
-  }
-
-  if (!hasValue(config.googleDrive?.redirectUri)) {
-    missing.push('GOOGLE_DRIVE_REDIRECT_URI');
-  }
-
-  const hasRefreshToken =
-    hasValue(env.GOOGLE_DRIVE_REFRESH_TOKEN) || hasValue(tokens?.refreshToken);
-
-  if (!hasRefreshToken) {
-    missing.push('GOOGLE_DRIVE_REFRESH_TOKEN');
-  }
-
-  return { enabled: missing.length === 0, missing };
+  return getStandardOAuthEnablement({
+    configValues: [
+      { value: config.googleDrive?.clientId, label: 'GOOGLE_DRIVE_CLIENT_ID' },
+      { value: config.googleDrive?.clientSecret, label: 'GOOGLE_DRIVE_CLIENT_SECRET' },
+      { value: config.googleDrive?.redirectUri, label: 'GOOGLE_DRIVE_REDIRECT_URI' },
+    ],
+    env,
+    refreshTokenEnvKeys: ['GOOGLE_DRIVE_REFRESH_TOKEN'],
+    refreshTokenLabel: 'GOOGLE_DRIVE_REFRESH_TOKEN',
+    tokens,
+  });
 };
 
 export const getSalesforceEnablement = (
@@ -115,26 +197,127 @@ export const getSalesforceEnablement = (
   const config = resolveConfig(options.config);
   const env = options.env ?? process.env;
   const tokens = resolveTokens<SalesforceTokens>('salesforce', options.tokens);
-  const missing: string[] = [];
 
-  if (!hasValue(config.salesforce?.clientId)) {
-    missing.push('SALESFORCE_CLIENT_ID');
+  return getStandardOAuthEnablement({
+    configValues: [
+      { value: config.salesforce?.clientId, label: 'SALESFORCE_CLIENT_ID' },
+      { value: config.salesforce?.clientSecret, label: 'SALESFORCE_CLIENT_SECRET' },
+      { value: config.salesforce?.redirectUri, label: 'SALESFORCE_REDIRECT_URI' },
+    ],
+    env,
+    refreshTokenEnvKeys: ['SALESFORCE_REFRESH_TOKEN'],
+    refreshTokenLabel: 'SALESFORCE_REFRESH_TOKEN',
+    tokens,
+  });
+};
+
+interface HealthOptions<TTokens> extends EnablementOptions<TTokens> {
+  now?: number;
+}
+
+export const getGitHubHealth = (
+  options: HealthOptions<GitHubTokens> = {},
+): IntegrationHealth => {
+  const env = options.env ?? process.env;
+  const enablement = getGitHubEnablement(options);
+  const now = options.now ?? Date.now();
+  const hasEnvToken = hasEnvValue(env, ['GITHUB_OAUTH_TOKEN', 'GITHUB_TOKEN']);
+
+  if (hasEnvToken) {
+    return {
+      integrationId: 'github',
+      enabled: enablement.enabled,
+      missing: enablement.missing,
+      token: buildTokenHealth({
+        source: 'env',
+        hasTokens: true,
+        now,
+      }),
+    };
   }
 
-  if (!hasValue(config.salesforce?.clientSecret)) {
-    missing.push('SALESFORCE_CLIENT_SECRET');
+  const tokens = resolveTokens<GitHubTokens>('github', options.tokens);
+  const hasStoredTokens = Boolean(tokens?.accessToken || tokens?.refreshToken);
+
+  return {
+    integrationId: 'github',
+    enabled: enablement.enabled,
+    missing: enablement.missing,
+    token: buildTokenHealth({
+      source: hasStoredTokens ? 'store' : 'none',
+      hasTokens: hasStoredTokens,
+      expiresAt: hasStoredTokens ? tokens?.expiresAt : undefined,
+      refreshTokenExpiresAt: hasStoredTokens ? tokens?.refreshTokenExpiresAt : undefined,
+      updatedAt: hasStoredTokens ? tokens?.updatedAt : undefined,
+      now,
+    }),
+  };
+};
+
+export const getGoogleDriveHealth = (
+  options: HealthOptions<GoogleDriveTokens> = {},
+): IntegrationHealth => {
+  const env = options.env ?? process.env;
+  const enablement = getGoogleDriveEnablement(options);
+  const now = options.now ?? Date.now();
+  const tokens = resolveTokens<GoogleDriveTokens>('google_drive', options.tokens);
+  const hasStoredTokens = Boolean(tokens?.refreshToken || tokens?.accessToken);
+  const hasEnvToken = hasEnvValue(env, ['GOOGLE_DRIVE_REFRESH_TOKEN']);
+  const hasTokens = hasStoredTokens || hasEnvToken;
+  const source: IntegrationTokenSource = hasStoredTokens ? 'store' : hasEnvToken ? 'env' : 'none';
+
+  return {
+    integrationId: 'google_drive',
+    enabled: enablement.enabled,
+    missing: enablement.missing,
+    token: buildTokenHealth({
+      source,
+      hasTokens,
+      expiresAt: hasStoredTokens ? tokens?.expiryDate : undefined,
+      updatedAt: hasStoredTokens ? tokens?.updatedAt : undefined,
+      now,
+    }),
+  };
+};
+
+export const getSalesforceHealth = (
+  options: HealthOptions<SalesforceTokens> = {},
+): IntegrationHealth => {
+  const env = options.env ?? process.env;
+  const enablement = getSalesforceEnablement(options);
+  const now = options.now ?? Date.now();
+  const tokens = resolveTokens<SalesforceTokens>('salesforce', options.tokens);
+  const hasStoredTokens = Boolean(tokens?.refreshToken || tokens?.accessToken);
+  const hasEnvToken = hasEnvValue(env, ['SALESFORCE_REFRESH_TOKEN']);
+  const hasTokens = hasStoredTokens || hasEnvToken;
+  const source: IntegrationTokenSource = hasStoredTokens ? 'store' : hasEnvToken ? 'env' : 'none';
+
+  return {
+    integrationId: 'salesforce',
+    enabled: enablement.enabled,
+    missing: enablement.missing,
+    token: buildTokenHealth({
+      source,
+      hasTokens,
+      expiresAt: hasStoredTokens ? tokens?.expiresAt : undefined,
+      updatedAt: hasStoredTokens ? tokens?.updatedAt : undefined,
+      now,
+    }),
+  };
+};
+
+export const getIntegrationHealth = (
+  integrationId: string,
+  options: HealthOptions<Record<string, unknown>> = {},
+): IntegrationHealth | null => {
+  if (integrationId === 'github') {
+    return getGitHubHealth(options as HealthOptions<GitHubTokens>);
   }
-
-  if (!hasValue(config.salesforce?.redirectUri)) {
-    missing.push('SALESFORCE_REDIRECT_URI');
+  if (integrationId === 'google_drive') {
+    return getGoogleDriveHealth(options as HealthOptions<GoogleDriveTokens>);
   }
-
-  const hasRefreshToken =
-    hasValue(env.SALESFORCE_REFRESH_TOKEN) || hasValue(tokens?.refreshToken);
-
-  if (!hasRefreshToken) {
-    missing.push('SALESFORCE_REFRESH_TOKEN');
+  if (integrationId === 'salesforce') {
+    return getSalesforceHealth(options as HealthOptions<SalesforceTokens>);
   }
-
-  return { enabled: missing.length === 0, missing };
+  return null;
 };

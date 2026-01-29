@@ -20,7 +20,7 @@ const bootstrap = async () => {
   await tokenStore.load();
 
   // Register all integrations
-  registerAllIntegrations();
+  await registerAllIntegrations();
 
   const config = loadConfig();
   logger.info(`[Adept] Starting with provider: ${config.defaultProvider}`);

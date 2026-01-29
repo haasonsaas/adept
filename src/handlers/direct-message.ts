@@ -1,8 +1,9 @@
-import { generateResponse, generateResponseWithHistory } from '../lib/agent.js';
 import { slackService } from '../lib/slack.js';
-import { handleCommand, getOnboardingResponse } from '../lib/commands.js';
+import { getOnboardingResponse } from '../lib/commands.js';
 import type { AssistantThreadStartedEvent, DirectMessageEvent } from '../types/slack.js';
 import { logger } from '../lib/logger.js';
+import { DEFAULT_ERROR_MESSAGE, runAssistantFlow } from './assistant-flow.js';
+import type { KnownBlock } from '@slack/web-api';
 
 export async function handleDirectMessage(event: DirectMessageEvent): Promise<void> {
   const { channel, thread_ts, ts, text, bot_id, subtype } = event;
@@ -21,43 +22,27 @@ export async function handleDirectMessage(event: DirectMessageEvent): Promise<vo
     await slackService.setAssistantStatus(channel, threadTs, status);
   };
 
-  try {
-    await updateStatus('is thinking...');
-
-    let response: string;
-
-    const commandResponse = text ? await handleCommand(text) : null;
-    if (commandResponse) {
-      await slackService.postMessage(
-        channel,
-        commandResponse.text,
-        threadTs,
-        commandResponse.blocks,
-      );
-      await updateStatus('');
+  const sendResponse = async (responseText: string, blocks?: KnownBlock[]) => {
+    if (blocks) {
+      await slackService.postMessage(channel, responseText, threadTs, blocks);
       return;
     }
+    await slackService.postMessage(channel, responseText, threadTs);
+  };
 
-    if (thread_ts) {
-      // Get thread context
-      const messages = await slackService.getThreadMessages(channel, thread_ts, botUserId);
-      response = await generateResponseWithHistory(messages, updateStatus);
-    } else {
-      // New conversation
-      response = await generateResponse(text || '', updateStatus);
-    }
-
-    await slackService.postMessage(channel, response, threadTs);
-    await updateStatus('');
-  } catch (error) {
-    logger.error({ error, channel, threadTs }, '[DM] Error generating response');
-    await slackService.postMessage(
-      channel,
-      '_Sorry, I encountered an error processing your request._',
-      threadTs,
-    );
-    await updateStatus('');
-  }
+  await runAssistantFlow({
+    text: text || '',
+    threadTs: thread_ts,
+    getThreadMessages: thread_ts
+      ? () => slackService.getThreadMessages(channel, thread_ts, botUserId)
+      : undefined,
+    onStatusUpdate: updateStatus,
+    setInitialStatus: true,
+    sendResponse,
+    errorMessage: DEFAULT_ERROR_MESSAGE,
+    onError: (error) => logger.error({ error, channel, threadTs }, '[DM] Error generating response'),
+    onFinally: () => updateStatus(''),
+  });
 }
 
 export async function handleAssistantThreadStarted(
