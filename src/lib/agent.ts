@@ -17,6 +17,7 @@ import {
   buildFallbackHandoff,
   formatExecutionHandoff,
   parseExecutionHandoff,
+  type ExecutionHandoff,
 } from './execution-handoff.js';
 import { handoffMonitor } from './handoff-monitor.js';
 import { toolGuardrails } from './tool-guardrails.js';
@@ -39,7 +40,6 @@ Mission:
 - If multiple systems might contain the answer, search them in parallel.
 - If you need a capability, use tool_registry_search to find the right tool.
 - Never fabricate tool results, IDs, links, or outcomes.
-- If required tools are unavailable, mark the request as blocked and explain what is missing.
 - If required tools are unavailable, mark the request as blocked and explain what is missing.
 
 Briefing output (person/company/deal requests):
@@ -115,16 +115,50 @@ const buildBaseMessages = (input: GenerationInput) =>
         content: message.content,
       }));
 
-const buildPresenterMessages = (input: GenerationInput, handoff: string) => [
+const buildPresenterDirective = (handoff: ExecutionHandoff): string => {
+  const followUp = handoff.followUp?.trim();
+  const hasFollowUp = Boolean(followUp);
+  const draft = handoff.draft?.trim();
+
+  if (handoff.status === 'needs_info') {
+    return [
+      'The execution handoff indicates more information is needed.',
+      hasFollowUp
+        ? `Ask this follow-up question exactly: ${followUp}`
+        : 'Ask one concise follow-up question to gather the missing detail.',
+      'Do not claim completion or say "Done."',
+    ].join('\n');
+  }
+
+  if (handoff.status === 'blocked') {
+    return [
+      'The execution handoff is blocked.',
+      'Explain what is missing using the Missing and Errors sections, and offer the next best step.',
+      hasFollowUp
+        ? `Ask this follow-up question if it will unblock the request: ${followUp}`
+        : 'If a question is needed, ask one focused follow-up.',
+      'Do not claim completion or say "Done."',
+    ].join('\n');
+  }
+
+  return [
+    'Using the execution handoff above, respond to the user. Do not mention the handoff or internal tools.',
+    'If a follow-up question is required, ask it directly.',
+    draft ? `Draft response to build from: ${draft}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+};
+
+const buildPresenterMessages = (input: GenerationInput, handoff: ExecutionHandoff) => [
   ...buildBaseMessages(input),
   {
     role: 'assistant' as const,
-    content: handoff,
+    content: formatExecutionHandoff(handoff),
   },
   {
     role: 'user' as const,
-    content:
-      'Using the execution handoff above, respond to the user. Do not mention the handoff or internal tools. If a follow-up question is required, ask it directly.',
+    content: buildPresenterDirective(handoff),
   },
 ];
 
@@ -335,16 +369,16 @@ const generateTextResponse = async (
   }
 
   const needsBriefing = isBriefingRequest(extractLatestUserMessage(input));
-  const presenterMessages = needsBriefing
+  const presenterMessages = needsBriefing && finalHandoff.status === 'done'
     ? [
-        ...buildPresenterMessages(input, formatExecutionHandoff(finalHandoff)),
+        ...buildPresenterMessages(input, finalHandoff),
         {
           role: 'user' as const,
           content:
             'Format this as a briefing using the required sections and include section-level sources. End with a short question offering to draft a call agenda.',
         },
       ]
-    : buildPresenterMessages(input, formatExecutionHandoff(finalHandoff));
+    : buildPresenterMessages(input, finalHandoff);
 
   const presenterResponse = await generateText({
     model: presenterModel,
