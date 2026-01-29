@@ -1,10 +1,12 @@
 import { z } from 'zod';
 
 export const ExecutionHandoffSchema = z.object({
-  status: z.enum(['done', 'needs_info', 'blocked']),
+  status: z.enum(['done', 'needs_info', 'blocked', 'planning']),
+  plan: z.array(z.string()),
   actions: z.array(z.string()),
   data: z.array(z.string()),
   errors: z.array(z.string()),
+  verification: z.array(z.string()),
   missing: z.array(z.string()),
   followUp: z.string().nullable(),
   draft: z.string().nullable(),
@@ -13,12 +15,22 @@ export const ExecutionHandoffSchema = z.object({
 
 export type ExecutionHandoff = z.infer<typeof ExecutionHandoffSchema>;
 
-type SectionKey = 'actions' | 'data' | 'errors' | 'missing' | 'followUp' | 'draft';
+type SectionKey =
+  | 'plan'
+  | 'actions'
+  | 'data'
+  | 'errors'
+  | 'verification'
+  | 'missing'
+  | 'followUp'
+  | 'draft';
 
 const SECTION_KEYS: Record<string, SectionKey> = {
+  plan: 'plan',
   actions: 'actions',
   data: 'data',
   errors: 'errors',
+  verification: 'verification',
   missing: 'missing',
   'follow-up': 'followUp',
   'follow up': 'followUp',
@@ -27,9 +39,11 @@ const SECTION_KEYS: Record<string, SectionKey> = {
 };
 
 const REQUIRED_SECTIONS: SectionKey[] = [
+  'plan',
   'actions',
   'data',
   'errors',
+  'verification',
   'missing',
   'followUp',
   'draft',
@@ -52,9 +66,11 @@ const appendItem = (
   section: SectionKey,
   item: string,
   accumulators: {
+    plan: string[];
     actions: string[];
     data: string[];
     errors: string[];
+    verification: string[];
     missing: string[];
     followUp: string | null;
     draft: string | null;
@@ -95,9 +111,11 @@ export const parseExecutionHandoff = (raw: string): ExecutionHandoffParseResult 
   const sectionsSeen = new Set<SectionKey>();
 
   const accumulators = {
+    plan: [] as string[],
     actions: [] as string[],
     data: [] as string[],
     errors: [] as string[],
+    verification: [] as string[],
     missing: [] as string[],
     followUp: null as string | null,
     draft: null as string | null,
@@ -110,7 +128,7 @@ export const parseExecutionHandoff = (raw: string): ExecutionHandoffParseResult 
     const statusMatch = line.match(/^Status:\s*(.+)$/i);
     if (statusMatch) {
       const candidate = statusMatch[1].trim().toLowerCase();
-      if (candidate === 'done' || candidate === 'needs_info' || candidate === 'blocked') {
+      if (candidate === 'done' || candidate === 'needs_info' || candidate === 'blocked' || candidate === 'planning') {
         status = candidate as ExecutionHandoff['status'];
       } else {
         errors.push(`Invalid status "${statusMatch[1].trim()}".`);
@@ -155,9 +173,11 @@ export const parseExecutionHandoff = (raw: string): ExecutionHandoffParseResult 
 
   const handoff: ExecutionHandoff = {
     status: status ?? 'blocked',
+    plan: accumulators.plan,
     actions: accumulators.actions,
     data: accumulators.data,
     errors: accumulators.errors,
+    verification: accumulators.verification,
     missing: accumulators.missing,
     followUp: accumulators.followUp,
     draft: accumulators.draft,
@@ -189,12 +209,16 @@ export const formatExecutionHandoff = (handoff: ExecutionHandoff): string =>
   [
     'EXECUTION_HANDOFF',
     `Status: ${handoff.status}`,
+    'Plan:',
+    formatList(handoff.plan),
     'Actions:',
     formatList(handoff.actions),
     'Data:',
     formatList(handoff.data),
     'Errors:',
     formatList(handoff.errors),
+    'Verification:',
+    formatList(handoff.verification),
     'Missing:',
     formatList(handoff.missing),
     'Follow-up:',
@@ -205,9 +229,11 @@ export const formatExecutionHandoff = (handoff: ExecutionHandoff): string =>
 
 export const buildFallbackHandoff = (reason: string, followUp?: string): ExecutionHandoff => ({
   status: 'blocked',
+  plan: [],
   actions: [],
   data: [],
   errors: [reason],
+  verification: [],
   missing: ['executor_handoff_format'],
   followUp: followUp ?? 'Could you restate the request or provide more detail?',
   draft: null,

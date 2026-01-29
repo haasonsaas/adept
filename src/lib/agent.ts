@@ -41,6 +41,9 @@ Mission:
 - If you need a capability, use tool_registry_search to find the right tool.
 - Never fabricate tool results, IDs, links, or outcomes.
 - If required tools are unavailable, mark the request as blocked and explain what is missing.
+- If you make changes or trigger side effects, run relevant verification when feasible and report results.
+- If the work is multi-step, include a short Plan (1-3 bullets).
+- If requirements are unclear or confirmation is needed before acting, do not call tools. Set Status to planning, include a Plan, and ask for confirmation.
 
 Briefing output (person/company/deal requests):
 - In the Data section, prefix each bullet with one of: Profile:, Opportunity:, Activity:, Talking Points:.
@@ -51,13 +54,17 @@ Return a single execution handoff in the exact format below. Use plain text (no 
 If a section has nothing, write "none".
 
 EXECUTION_HANDOFF
-Status: <done|needs_info|blocked>
+Status: <done|needs_info|blocked|planning>
+Plan:
+- <short plan steps or "none">
 Actions:
 - <action summary with IDs/links>
 Data:
 - <facts with sources>
 Errors:
 - <tool errors with hints>
+Verification:
+- <tests/lints/builds run, or "not run (reason)">
 Missing:
 - <required info or tools>
 Follow-up:
@@ -83,10 +90,12 @@ Operating model:
 Response style (Slack):
 - Be concise and direct.
 - For completed actions, start with "Done." and then the result.
+- When a Plan is provided, include a one-line task receipt and the Plan bullets; for completed actions keep "Done." first.
 - Include identifiers/links (issue keys, PR numbers, doc links) when available.
 - Avoid duplicates: check for existing items before creating new tickets/issues.
 - When asked to implement or fix something, create a PR if repository tools are available and include a short "The fix:" bullet list.
 - If required tools are unavailable or a tool search yields no results, say so and offer the next best step (e.g., ask to connect an integration or provide manual instructions).
+- If verification results exist, summarize them briefly; if verification is missing or failed, call it out and propose the next step.
 - Always cite sources when using data from integrations.
 - Format responses for Slack (use *bold*, _italic_, bullet points).
 
@@ -119,10 +128,32 @@ const buildPresenterDirective = (handoff: ExecutionHandoff): string => {
   const followUp = handoff.followUp?.trim();
   const hasFollowUp = Boolean(followUp);
   const draft = handoff.draft?.trim();
+  const hasPlan = handoff.plan.length > 0;
+  const hasVerification = handoff.verification.length > 0;
+  const verificationSummary = handoff.verification.join(' ').toLowerCase();
+  const verificationNeedsAttention = /not run|not-run|failed|fail|error|skipped/.test(
+    verificationSummary,
+  );
+
+  if (handoff.status === 'planning') {
+    return [
+      'The execution handoff indicates planning is required before acting.',
+      'Start with a one-sentence task receipt.',
+      hasPlan ? 'List the Plan bullets from the handoff.' : 'Provide a short plan (1-3 bullets).',
+      hasFollowUp
+        ? `Ask for confirmation or this follow-up question: ${followUp}`
+        : 'Ask for confirmation to proceed.',
+      'Do not claim completion or say "Done."',
+    ].join('\n');
+  }
 
   if (handoff.status === 'needs_info') {
     return [
       'The execution handoff indicates more information is needed.',
+      'Start with a one-sentence task receipt.',
+      hasPlan
+        ? 'Include the Plan bullets from the handoff.'
+        : 'Provide a short plan (1-3 bullets) for how you will proceed.',
       hasFollowUp
         ? `Ask this follow-up question exactly: ${followUp}`
         : 'Ask one concise follow-up question to gather the missing detail.',
@@ -133,6 +164,10 @@ const buildPresenterDirective = (handoff: ExecutionHandoff): string => {
   if (handoff.status === 'blocked') {
     return [
       'The execution handoff is blocked.',
+      'Start with a one-sentence task receipt.',
+      hasPlan
+        ? 'Include the Plan bullets from the handoff.'
+        : 'Provide a short plan (1-3 bullets) for how you will proceed once unblocked.',
       'Explain what is missing using the Missing and Errors sections, and offer the next best step.',
       hasFollowUp
         ? `Ask this follow-up question if it will unblock the request: ${followUp}`
@@ -141,9 +176,19 @@ const buildPresenterDirective = (handoff: ExecutionHandoff): string => {
     ].join('\n');
   }
 
+  const verificationDirective = hasVerification
+    ? 'Summarize Verification briefly.'
+    : 'If Actions include code or system changes and no Verification is listed, note that verification was not run and offer to run checks.';
+  const planDirective = hasPlan
+    ? 'After "Done.", include a one-line task receipt and a short Plan list from the handoff before the results.'
+    : null;
+
   return [
     'Using the execution handoff above, respond to the user. Do not mention the handoff or internal tools.',
     'If a follow-up question is required, ask it directly.',
+    verificationDirective,
+    planDirective,
+    verificationNeedsAttention ? 'Call out verification issues and offer to resolve them.' : null,
     draft ? `Draft response to build from: ${draft}` : null,
   ]
     .filter(Boolean)
@@ -375,7 +420,7 @@ const generateTextResponse = async (
         {
           role: 'user' as const,
           content:
-            'Format this as a briefing using the required sections and include section-level sources. End with a short question offering to draft a call agenda.',
+            'Format this as a briefing using the required sections and include section-level sources. Ignore any plan/receipt formatting. End with a short question offering to draft a call agenda.',
         },
       ]
     : buildPresenterMessages(input, finalHandoff);

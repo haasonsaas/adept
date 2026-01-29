@@ -12,7 +12,7 @@ interface HandoffMetrics {
 interface HandoffTelemetryInput {
   parsed: boolean;
   missingFields: string[];
-  status?: 'done' | 'needs_info' | 'blocked';
+  status?: 'done' | 'needs_info' | 'blocked' | 'planning';
   blockedReasons?: string[];
 }
 
