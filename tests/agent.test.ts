@@ -27,6 +27,23 @@ vi.mock('ai', async () => {
   };
 });
 
+const buildHandoff = (status = 'done') => [
+  'EXECUTION_HANDOFF',
+  `Status: ${status}`,
+  'Actions:',
+  '- none',
+  'Data:',
+  '- none',
+  'Errors:',
+  '- none',
+  'Missing:',
+  '- none',
+  'Follow-up:',
+  '- none',
+  'Draft:',
+  '- none',
+].join('\n');
+
 describe('generateResponse', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -36,7 +53,7 @@ describe('generateResponse', () => {
     const mockGenerateText = vi.mocked(ai.generateText);
     mockGenerateText
       .mockResolvedValueOnce({
-        text: 'EXECUTION_HANDOFF\nStatus: done',
+        text: buildHandoff('done'),
         toolCalls: [],
         toolResults: [],
         finishReason: 'stop',
@@ -69,7 +86,7 @@ describe('generateResponse', () => {
     const mockGenerateText = vi.mocked(ai.generateText);
     mockGenerateText
       .mockResolvedValueOnce({
-        text: 'EXECUTION_HANDOFF\nStatus: done',
+        text: buildHandoff('done'),
         toolCalls: [],
         toolResults: [],
         finishReason: 'stop',
@@ -104,7 +121,7 @@ describe('generateResponse', () => {
           });
         }
         return {
-          text: 'EXECUTION_HANDOFF\nStatus: done',
+          text: buildHandoff('done'),
           toolCalls: [],
           toolResults: [],
           finishReason: 'stop',

@@ -6,7 +6,7 @@ import { DEFAULT_ERROR_MESSAGE, runAssistantFlow } from './assistant-flow.js';
 import type { KnownBlock } from '@slack/web-api';
 
 export async function handleDirectMessage(event: DirectMessageEvent): Promise<void> {
-  const { channel, thread_ts, ts, text, bot_id, subtype, user } = event;
+  const { channel, thread_ts, ts, text, bot_id, subtype, user, team_id } = event;
 
   // Ignore bot messages and subtypes (like message_changed)
   if (bot_id || subtype) {
@@ -37,6 +37,7 @@ export async function handleDirectMessage(event: DirectMessageEvent): Promise<vo
       userId: user,
       channelId: channel,
       threadTs,
+      teamId: team_id,
     },
     getThreadMessages: thread_ts
       ? () => slackService.getThreadMessages(channel, thread_ts, botUserId)

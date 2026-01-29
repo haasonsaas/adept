@@ -13,8 +13,26 @@ import { outcomeMonitor } from './outcome-monitor.js';
 import { rateLimiter } from './rate-limiter.js';
 import { toolRecorder } from './tool-recorder.js';
 import { logger } from './logger.js';
+import {
+  buildFallbackHandoff,
+  formatExecutionHandoff,
+  parseExecutionHandoff,
+} from './execution-handoff.js';
+import { handoffMonitor } from './handoff-monitor.js';
+import { toolGuardrails } from './tool-guardrails.js';
 
-const buildExecutorInstructions = () => `You are Adept Executor, an internal execution engine for Adept. You do not talk to the user.
+const buildExecutorInstructions = (options?: {
+  toolHints?: string[];
+  allowlistSummary?: string | null;
+}) => {
+  const toolHints = options?.toolHints && options.toolHints.length > 0
+    ? `\nTool routing hints:\n- ${options.toolHints.join('\n- ')}`
+    : '';
+  const allowlist = options?.allowlistSummary
+    ? `\nAllowed tools for this workspace:\n${options.allowlistSummary}`
+    : '';
+
+  return `You are Adept Executor, an internal execution engine for Adept. You do not talk to the user.
 
 Mission:
 - Use tools to gather information and perform actions.
@@ -42,7 +60,8 @@ Follow-up:
 Draft:
 - <optional short response or "none">
 
-Current date: ${new Date().toISOString().split('T')[0]}`;
+Current date: ${new Date().toISOString().split('T')[0]}${toolHints}${allowlist}`;
+};
 
 const buildPresenterInstructions = () => `You are Adept, an AI assistant for business operations and execution. You help teams work faster by:
 - Answering questions using data from connected business systems
@@ -78,28 +97,39 @@ When asked about a person, company, or deal:
 
 You have access to tools from connected integrations. Use them proactively to gather context.`;
 
-const buildPresenterMessages = (input: GenerationInput, handoff: string) => {
-  const baseMessages =
-    'prompt' in input
-      ? [{ role: 'user' as const, content: input.prompt }]
-      : input.messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        }));
+const buildBaseMessages = (input: GenerationInput) =>
+  'prompt' in input
+    ? [{ role: 'user' as const, content: input.prompt }]
+    : input.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
 
-  return [
-    ...baseMessages,
-    {
-      role: 'assistant' as const,
-      content: `EXECUTION HANDOFF:\n${handoff}`,
-    },
-    {
-      role: 'user' as const,
-      content:
-        'Using the execution handoff above, respond to the user. Do not mention the handoff or internal tools. If a follow-up question is required, ask it directly.',
-    },
-  ];
-};
+const buildPresenterMessages = (input: GenerationInput, handoff: string) => [
+  ...buildBaseMessages(input),
+  {
+    role: 'assistant' as const,
+    content: handoff,
+  },
+  {
+    role: 'user' as const,
+    content:
+      'Using the execution handoff above, respond to the user. Do not mention the handoff or internal tools. If a follow-up question is required, ask it directly.',
+  },
+];
+
+const buildExecutorRepairMessages = (input: GenerationInput, previousOutput: string) => [
+  ...buildBaseMessages(input),
+  {
+    role: 'assistant' as const,
+    content: previousOutput,
+  },
+  {
+    role: 'user' as const,
+    content:
+      'Your previous output did not follow the required EXECUTION_HANDOFF format. Reformat it exactly to the required structure. Do not call any tools. If information is missing, write "none" in those sections and set Status to needs_info.',
+  },
+];
 
 const formatToolNames = (toolNames: string[]): string | null => {
   const unique = Array.from(
@@ -163,9 +193,13 @@ const generateTextResponse = async (
   context?: AgentContext,
 ): Promise<string> => {
   const config = loadConfig();
-  const model = getModel();
+  const executorModel = getExecutorModel();
+  const presenterModel = getPresenterModel();
   const requestId = randomUUID();
   const tools = getAllTools(requestId);
+  const workspaceId = context?.workspaceId ?? context?.teamId;
+  const toolHints = toolGuardrails.getToolHints(workspaceId);
+  const allowlistSummary = toolGuardrails.getAllowlistSummary(workspaceId);
 
   await onStatusUpdate?.('is thinking...');
 
@@ -176,9 +210,14 @@ const generateTextResponse = async (
 
   logger.info({ requestId }, '[Agent] Request started');
 
+  const executorInstructions = buildExecutorInstructions({
+    toolHints,
+    allowlistSummary,
+  });
+
   const executorResponse = await generateText({
-    model,
-    system: buildExecutorInstructions(),
+    model: executorModel,
+    system: executorInstructions,
     ...request,
     tools,
     stopWhen: stepCountIs(config.maxToolSteps),
@@ -188,10 +227,52 @@ const generateTextResponse = async (
     },
   });
 
-  const presenterMessages = buildPresenterMessages(input, executorResponse.text);
+  let parseResult = parseExecutionHandoff(executorResponse.text);
+  let handoff = parseResult.handoff;
+  let usedRepair = false;
+
+  if (!parseResult.ok) {
+    logger.warn({ requestId, errors: parseResult.errors }, '[Agent] Invalid execution handoff, attempting repair');
+    const repairResponse = await generateText({
+      model: executorModel,
+      system: executorInstructions,
+      messages: buildExecutorRepairMessages(input, executorResponse.text),
+      experimental_context: context,
+    });
+    const repaired = parseExecutionHandoff(repairResponse.text);
+    usedRepair = true;
+
+    if (repaired.ok) {
+      parseResult = repaired;
+      handoff = repaired.handoff;
+    } else {
+      parseResult = {
+        ok: false,
+        errors: [...parseResult.errors, ...repaired.errors],
+        missingFields: Array.from(new Set([...parseResult.missingFields, ...repaired.missingFields])),
+        handoff: repaired.handoff,
+      };
+      handoff = buildFallbackHandoff('Execution handoff could not be parsed.');
+    }
+  }
+
+  const finalHandoff = handoff ?? buildFallbackHandoff('Execution handoff missing.');
+
+  await handoffMonitor.record({
+    parsed: parseResult.ok,
+    missingFields: parseResult.missingFields,
+    status: finalHandoff.status,
+    blockedReasons: finalHandoff.status === 'blocked' ? finalHandoff.missing : undefined,
+  });
+
+  if (usedRepair) {
+    logger.info({ requestId }, '[Agent] Executor handoff repaired');
+  }
+
+  const presenterMessages = buildPresenterMessages(input, formatExecutionHandoff(finalHandoff));
 
   const presenterResponse = await generateText({
-    model,
+    model: presenterModel,
     system: buildPresenterInstructions(),
     messages: presenterMessages,
     experimental_context: context,
@@ -202,37 +283,83 @@ const generateTextResponse = async (
   return formatSlackText(presenterResponse.text);
 };
 
-function getModel() {
+const DEFAULT_MODELS = {
+  openai: {
+    executor: 'gpt-4.1-mini',
+    presenter: 'gpt-4.1',
+  },
+  anthropic: {
+    executor: 'claude-3-5-haiku-20241022',
+    presenter: 'claude-opus-4-5',
+  },
+} as const;
+
+const resolveModel = (provider: 'openai' | 'anthropic', modelName: string) =>
+  provider === 'openai' ? openai(modelName) : anthropic(modelName);
+
+const getExecutorModel = () => {
   const config = loadConfig();
   const hasAnthropic = !!config.anthropicApiKey;
   const hasOpenAI = !!config.openaiApiKey;
 
-  if (config.defaultProvider === 'anthropic') {
-    if (hasAnthropic) {
-      return anthropic('claude-opus-4-5');
-    }
+  if (config.defaultProvider === 'openai') {
     if (hasOpenAI) {
+      return resolveModel('openai', config.executorModel ?? DEFAULT_MODELS.openai.executor);
+    }
+    if (hasAnthropic) {
       logger.warn(
-        '[Adept] DEFAULT_AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing. Falling back to OpenAI.',
+        '[Adept] DEFAULT_AI_PROVIDER=openai but OPENAI_API_KEY is missing. Falling back to Anthropic for executor.',
       );
-      return openai('gpt-4.1');
+      return resolveModel('anthropic', DEFAULT_MODELS.anthropic.executor);
     }
   }
 
-  if (config.defaultProvider === 'openai') {
-    if (hasOpenAI) {
-      return openai('gpt-4.1');
-    }
+  if (config.defaultProvider === 'anthropic') {
     if (hasAnthropic) {
+      return resolveModel('anthropic', config.executorModel ?? DEFAULT_MODELS.anthropic.executor);
+    }
+    if (hasOpenAI) {
       logger.warn(
-        '[Adept] DEFAULT_AI_PROVIDER=openai but OPENAI_API_KEY is missing. Falling back to Anthropic.',
+        '[Adept] DEFAULT_AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing. Falling back to OpenAI for executor.',
       );
-      return anthropic('claude-opus-4-5');
+      return resolveModel('openai', DEFAULT_MODELS.openai.executor);
     }
   }
 
   throw new Error('No AI provider configured');
-}
+};
+
+const getPresenterModel = () => {
+  const config = loadConfig();
+  const hasAnthropic = !!config.anthropicApiKey;
+  const hasOpenAI = !!config.openaiApiKey;
+
+  if (config.defaultProvider === 'openai') {
+    if (hasOpenAI) {
+      return resolveModel('openai', config.presenterModel ?? DEFAULT_MODELS.openai.presenter);
+    }
+    if (hasAnthropic) {
+      logger.warn(
+        '[Adept] DEFAULT_AI_PROVIDER=openai but OPENAI_API_KEY is missing. Falling back to Anthropic for presenter.',
+      );
+      return resolveModel('anthropic', DEFAULT_MODELS.anthropic.presenter);
+    }
+  }
+
+  if (config.defaultProvider === 'anthropic') {
+    if (hasAnthropic) {
+      return resolveModel('anthropic', config.presenterModel ?? DEFAULT_MODELS.anthropic.presenter);
+    }
+    if (hasOpenAI) {
+      logger.warn(
+        '[Adept] DEFAULT_AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing. Falling back to OpenAI for presenter.',
+      );
+      return resolveModel('openai', DEFAULT_MODELS.openai.presenter);
+    }
+  }
+
+  throw new Error('No AI provider configured');
+};
 
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (value && typeof value === 'object') {
@@ -274,6 +401,33 @@ const wrapToolExecution = (
       const workspaceId = execContext.workspaceId ?? execContext.teamId;
       const sessionId = execContext.threadTs;
       const inputs = toRecord(input);
+
+      const allowlistCheck = toolGuardrails.isToolAllowed({
+        workspaceId,
+        toolName,
+        integrationId,
+      });
+      if (!allowlistCheck.allowed) {
+        return createToolError(integrationId, 'Tool not allowed for this workspace.', {
+          hint: allowlistCheck.reason ?? 'This tool is not permitted in the current workspace.',
+        });
+      }
+
+      const allowDuplicate = Boolean(
+        (inputs as Record<string, unknown>).force || (inputs as Record<string, unknown>).allowDuplicate,
+      );
+      if (!allowDuplicate && toolGuardrails.shouldDedupe(toolName)) {
+        const duplicate = toolGuardrails.isDuplicate({
+          workspaceId,
+          toolName,
+          input: inputs,
+        });
+        if (duplicate) {
+          return createToolError(integrationId, 'Duplicate action detected.', {
+            hint: 'A similar create action was recently executed. If this is intentional, retry with force=true or adjust the request details.',
+          });
+        }
+      }
 
       const rateCheck = await rateLimiter.check(toolName, userId);
       if (!rateCheck.allowed) {

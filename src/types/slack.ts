@@ -5,6 +5,7 @@ export interface AppMentionEvent {
   text: string;
   bot_id?: string;
   user?: string;
+  team_id?: string;
 }
 
 export interface DirectMessageEvent {
@@ -16,6 +17,7 @@ export interface DirectMessageEvent {
   bot_id?: string;
   subtype?: string;
   user?: string;
+  team_id?: string;
 }
 
 export interface AssistantThreadStartedEvent {

@@ -34,6 +34,8 @@ export interface ConversationContext {
 
 export interface AdeptConfig {
   defaultProvider: 'openai' | 'anthropic';
+  executorModel?: string;
+  presenterModel?: string;
   enabledIntegrations: string[];
   maxToolSteps: number;
   redisUrl?: string;
@@ -92,6 +94,11 @@ export interface AdeptConfig {
     minSeverity?: 'low' | 'medium' | 'high';
     minIntervalMinutes?: number;
     driftAlertsEnabled?: boolean;
+  };
+  toolRouting?: {
+    allowlistByWorkspace?: Record<string, string[]>;
+    mustUseToolHintsByWorkspace?: Record<string, string[]>;
+    dedupeWindowMinutes?: number;
   };
 }
 

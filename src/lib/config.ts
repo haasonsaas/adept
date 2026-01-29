@@ -19,6 +19,30 @@ const resolveDefaultProvider = (): AdeptConfig['defaultProvider'] => {
   return 'anthropic';
 };
 
+const parseJson = <T>(value?: string): T | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    logger.warn({ error }, '[Config] Failed to parse JSON config');
+    return undefined;
+  }
+};
+
+const parseOptionalNumber = (value?: string): number | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) {
+    logger.warn({ value }, '[Config] Failed to parse number');
+    return undefined;
+  }
+  return parsed;
+};
+
 const buildConfig = (): AdeptConfig => {
   const oauthPort = Number(process.env.OAUTH_PORT || 3999);
   const oauthBaseUrl = process.env.OAUTH_BASE_URL || `http://localhost:${oauthPort}`;
@@ -27,9 +51,18 @@ const buildConfig = (): AdeptConfig => {
     .split(',')
     .map((domain) => domain.trim())
     .filter(Boolean);
+  const allowlistByWorkspace = parseJson<Record<string, string[]>>(
+    process.env.TOOL_ALLOWLIST_BY_WORKSPACE,
+  );
+  const mustUseToolHintsByWorkspace = parseJson<Record<string, string[]>>(
+    process.env.TOOL_HINTS_BY_WORKSPACE,
+  );
+  const dedupeWindowMinutes = parseOptionalNumber(process.env.TOOL_DEDUPE_WINDOW_MINUTES);
 
   return {
     defaultProvider: resolveDefaultProvider(),
+    executorModel: process.env.EXECUTOR_MODEL,
+    presenterModel: process.env.PRESENTER_MODEL,
     enabledIntegrations: (process.env.ENABLED_INTEGRATIONS || '').split(',').filter(Boolean),
     maxToolSteps: parseInt(process.env.MAX_TOOL_STEPS || '15', 10),
     redisUrl: process.env.REDIS_URL,
@@ -94,6 +127,13 @@ const buildConfig = (): AdeptConfig => {
         : undefined,
       driftAlertsEnabled: process.env.MONITORING_DRIFT_ALERTS_ENABLED
         ? process.env.MONITORING_DRIFT_ALERTS_ENABLED === 'true'
+        : undefined,
+    },
+    toolRouting: {
+      allowlistByWorkspace,
+      mustUseToolHintsByWorkspace,
+      dedupeWindowMinutes: dedupeWindowMinutes && dedupeWindowMinutes > 0
+        ? dedupeWindowMinutes
         : undefined,
     },
   };
