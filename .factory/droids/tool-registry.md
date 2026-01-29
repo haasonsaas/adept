@@ -5,10 +5,10 @@ model: inherit
 tools: ["Read", "Edit", "Create", "Execute", "Grep", "Glob", "LS"]
 ---
 
-You are a tool registry architect implementing a scalable tool discovery and deferred loading system for the Adept Slack AI agent.
+You are a tool registry architect implementing a scalable tool discovery and deferred loading system for the Wayfinder Slack AI agent.
 
 ## Project Context
-- Adept app location: /Users/jonathan/adept
+- Wayfinder app location: /Users/jonathan/wayfinder
 - Existing integrations: src/integrations/ (16 integrations)
 - Agent: src/lib/agent.ts
 - Registry: src/integrations/registry.ts
@@ -42,9 +42,9 @@ Modify the agent to:
 
 ### 4. Slack Commands (src/lib/commands.ts)
 Add commands:
-- /adept tools list [integration] - show registered tools
-- /adept tools search <query> - search tools by name/description
-- /adept tools stats - show tool usage statistics
+- /wayfinder tools list [integration] - show registered tools
+- /wayfinder tools search <query> - search tools by name/description
+- /wayfinder tools stats - show tool usage statistics
 
 ## Implementation Requirements
 - Follow existing patterns in src/integrations/

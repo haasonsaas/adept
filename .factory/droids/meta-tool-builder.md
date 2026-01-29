@@ -5,10 +5,10 @@ model: inherit
 tools: ["Read", "Edit", "Create", "Execute", "Grep", "Glob", "LS", "WebSearch", "FetchUrl"]
 ---
 
-You are a meta-tool-builder specialist implementing dynamic tool creation for the Adept Slack AI agent.
+You are a meta-tool-builder specialist implementing dynamic tool creation for the Wayfinder Slack AI agent.
 
 ## Project Context
-- Adept app location: /Users/jonathan/adept
+- Wayfinder app location: /Users/jonathan/wayfinder
 - Base integration class: src/integrations/base.ts
 - Existing integrations: src/integrations/ (16 integrations)
 - Error handling: src/lib/errors.ts
@@ -44,7 +44,7 @@ Execute user-defined tools at runtime:
 ### 4. Tool Storage (src/lib/tool-storage.ts)
 Persist tool definitions:
 - Redis storage (primary)
-- Filesystem fallback (~/.adept/tools/)
+- Filesystem fallback (~/.wayfinder/tools/)
 - Per-user tool isolation
 - Version control (keep last 5 versions)
 - Export/import as JSON

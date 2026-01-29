@@ -1,12 +1,12 @@
-# Adept
+# Wayfinder
 
-An open-source AI Computer for Business - a Slack-first AI agent that connects your business tools.
+Wayfinder is an open-source AI Computer for Business — a Slack-first AI agent that connects your business tools.
 
-Inspired by [Adapt](https://adapt.com), built with [Vercel AI SDK 6](https://ai-sdk.dev/) and TypeScript.
+Inspired by modern AI assistants, built with [Vercel AI SDK 6](https://ai-sdk.dev/) and TypeScript.
 
 ## Features
 
-- **Slack-native**: Tag `@Adept` in any channel or DM to get answers
+- **Slack-native**: Tag `@Wayfinder` in any channel or DM to get answers
 - **Multi-system context**: Pulls data from CRM, analytics, GitHub, and more
 - **Tool-based architecture**: Extensible integration system using AI SDK 6's `ToolLoopAgent`
 - **Smart routing**: Uses the best AI model for each task (Claude, GPT-4o)
@@ -16,7 +16,7 @@ Inspired by [Adapt](https://adapt.com), built with [Vercel AI SDK 6](https://ai-
 ### 1. Create a Slack App
 
 1. Go to [https://api.slack.com/apps](https://api.slack.com/apps) and click "Create New App"
-2. Choose "From scratch" and name it (e.g., "Adept")
+2. Choose "From scratch" and name it (e.g., "Wayfinder")
 3. Select your workspace
 
 ### 2. Configure Slack App Settings
@@ -80,13 +80,13 @@ npm run dev
 ## Usage
 
 ### In Channels
-Mention `@Adept` with your question:
+Mention `@Wayfinder` with your question:
 ```
-@Adept What should I know about Jillian Johnson from Acme Corp before our call?
+@Wayfinder What should I know about Jillian Johnson from Acme Corp before our call?
 ```
 
 ### In Direct Messages
-Just send a message directly to Adept:
+Just send a message directly to Wayfinder:
 ```
 What's our current sales pipeline looking like?
 ```

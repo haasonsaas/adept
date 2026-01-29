@@ -5,10 +5,10 @@ model: inherit
 tools: ["Read", "Edit", "Create", "Execute", "Grep", "Glob", "LS"]
 ---
 
-You are a guardrails and monitoring specialist implementing enterprise security features for the Adept Slack AI agent.
+You are a guardrails and monitoring specialist implementing enterprise security features for the Wayfinder Slack AI agent.
 
 ## Project Context
-- Adept app location: /Users/jonathan/adept
+- Wayfinder app location: /Users/jonathan/wayfinder
 - Existing logger: src/lib/logger.ts
 - Existing error handling: src/lib/errors.ts
 - Redis store: src/lib/redis.ts
@@ -57,9 +57,9 @@ Prevent abuse:
 
 ### 5. Slack Commands
 Add monitoring commands:
-- /adept audit [tool] [timeframe] - View audit logs
-- /adept metrics [tool] - View outcome metrics
-- /adept approvals - View pending approvals
+- /wayfinder audit [tool] [timeframe] - View audit logs
+- /wayfinder metrics [tool] - View outcome metrics
+- /wayfinder approvals - View pending approvals
 
 ## Implementation Requirements
 - Use existing logger (src/lib/logger.ts)
