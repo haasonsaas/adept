@@ -9,6 +9,7 @@ import { withRetry } from '../lib/retry.js';
 import type { SearchResult } from '../types/index.js';
 
 import { loadConfig } from '../lib/config.js';
+import { getGoogleDriveEnablement } from '../lib/integration-config.js';
 import { logger } from '../lib/logger.js';
 
 const MAX_TEXT_CHARS = 20000;
@@ -137,8 +138,7 @@ export class GoogleDriveIntegration extends BaseIntegration {
   icon = '📂';
 
   isEnabled(): boolean {
-    const config = loadConfig();
-    return !!(config.googleDrive?.clientId && config.googleDrive?.clientSecret);
+    return getGoogleDriveEnablement().enabled;
   }
 
   private client?: DriveClient;

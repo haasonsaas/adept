@@ -8,6 +8,7 @@ import { withRetry } from '../lib/retry.js';
 import type { SearchResult } from '../types/index.js';
 
 import { loadConfig } from '../lib/config.js';
+import { getGitHubEnablement } from '../lib/integration-config.js';
 import { logger } from '../lib/logger.js';
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -188,11 +189,7 @@ export class GitHubIntegration extends BaseIntegration {
   icon = '🐙';
 
   isEnabled(): boolean {
-    const config = loadConfig();
-    return !!(
-      (process.env.GITHUB_OAUTH_TOKEN || process.env.GITHUB_TOKEN) ||
-      (config.github?.oauthClientId && config.github?.oauthClientSecret)
-    );
+    return getGitHubEnablement().enabled;
   }
 
   getAuthConfig() {

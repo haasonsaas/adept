@@ -129,6 +129,10 @@ export class TokenStore {
     return Boolean(this.cache?.[integrationId]);
   }
 
+  getCachedTokens<T extends Record<string, unknown>>(integrationId: string): T | null {
+    return (this.cache?.[integrationId] as T | undefined) ?? null;
+  }
+
   async getTokens<T extends Record<string, unknown>>(integrationId: string): Promise<T | null> {
     await this.load();
     return (this.cache?.[integrationId] as T | undefined) ?? null;

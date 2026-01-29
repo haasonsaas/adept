@@ -1,6 +1,8 @@
 import type { AdeptConfig } from '../types/index.js';
 import { logger } from './logger.js';
 
+let cachedConfig: AdeptConfig | null = null;
+
 const resolveDefaultProvider = (): AdeptConfig['defaultProvider'] => {
   const raw = process.env.DEFAULT_AI_PROVIDER?.toLowerCase();
   if (raw === 'openai' || raw === 'anthropic') {
@@ -17,7 +19,7 @@ const resolveDefaultProvider = (): AdeptConfig['defaultProvider'] => {
   return 'anthropic';
 };
 
-export function loadConfig(): AdeptConfig {
+const buildConfig = (): AdeptConfig => {
   const oauthPort = Number(process.env.OAUTH_PORT || 3999);
   const oauthBaseUrl = process.env.OAUTH_BASE_URL || `http://localhost:${oauthPort}`;
 
@@ -60,6 +62,17 @@ export function loadConfig(): AdeptConfig {
       redirectUri: process.env.GOOGLE_DRIVE_REDIRECT_URI,
     },
   };
+};
+
+export function loadConfig(): AdeptConfig {
+  if (!cachedConfig) {
+    cachedConfig = buildConfig();
+  }
+  return cachedConfig;
+}
+
+export function resetConfig(): void {
+  cachedConfig = null;
 }
 
 export function validateEnv(): void {

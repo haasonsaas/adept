@@ -9,6 +9,7 @@ import { withRetry } from '../lib/retry.js';
 import type { SearchResult } from '../types/index.js';
 
 import { loadConfig } from '../lib/config.js';
+import { getSalesforceEnablement } from '../lib/integration-config.js';
 import { logger } from '../lib/logger.js';
 
 const DEFAULT_LOGIN_URL = 'https://login.salesforce.com';
@@ -253,8 +254,7 @@ export class SalesforceIntegration extends BaseIntegration {
   icon = '☁️';
 
   isEnabled(): boolean {
-    const config = loadConfig();
-    return !!(config.salesforce?.clientId && config.salesforce?.clientSecret);
+    return getSalesforceEnablement().enabled;
   }
 
   private client?: SalesforceClient;
